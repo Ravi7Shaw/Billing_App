@@ -435,15 +435,26 @@ class Database:
             ).fetchall()
 
     # -------------------------------------------------------------- bills
+
     def next_bill_no(self):
         today = datetime.now().strftime("%Y%m%d")
+        prefix = f"INV-{today}-"
+
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS c FROM bills WHERE bill_no LIKE ?",
-                (f"INV-{today}-%",),
+                """
+                SELECT COALESCE(
+                MAX(CAST(substr(bill_no, ?) AS INTEGER)),
+                0
+                ) AS max_seq
+                FROM bills
+                WHERE bill_no LIKE ?
+                """,
+                (len(prefix) + 1, f"{prefix}%"),
             ).fetchone()
-            seq = row["c"] + 1
-            return f"INV-{today}-{seq:03d}"
+
+        seq = row["max_seq"] + 1
+        return f"{prefix}{seq:03d}"
 
     def save_bill(
         self,
