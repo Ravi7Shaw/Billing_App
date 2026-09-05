@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Cloth Shop Billing</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">🧾 Cloth Shop Billing</div>
+  <div id="connStatus" class="conn-status conn-ok">● connected</div>
+</header>
+
+<nav class="tabs" id="tabNav">
+  <button class="tab-btn active" data-tab="billing">New Bill</button>
+  <button class="tab-btn" data-tab="inventory">Inventory</button>
+  <button class="tab-btn" data-tab="customers">Customers</button>
+  <button class="tab-btn" data-tab="sales">Sales</button>
+  <button class="tab-btn" data-tab="stats">Statistics</button>
+</nav>
+
+<main id="app">
+
+  <!-- ============================= NEW BILL ============================= -->
+  <section id="tab-billing" class="tab-panel active">
+    <div class="grid-2col">
+
+      <div class="col-left">
+        <div class="card">
+          <h3>Customer <span class="muted">(optional)</span></h3>
+          <div class="field-row">
+            <input id="custPhone" type="tel" placeholder="Phone number" inputmode="tel">
+            <input id="custName" type="text" placeholder="Name">
+          </div>
+          <div id="custMatchNote" class="muted small"></div>
+        </div>
+
+        <div class="card">
+          <h3>Scan barcode</h3>
+          <div class="field-row">
+            <input id="barcodeInput" type="text" placeholder="Scan or type barcode, then Enter" autocomplete="off">
+          </div>
+          <div id="barcodeStatus" class="small"></div>
+        </div>
+
+        <div class="card">
+          <h3>Add item manually</h3>
+          <div class="field-row">
+            <select id="categorySelect"></select>
+            <select id="subtypeSelect"><option value="">(none)</option></select>
+          </div>
+          <div class="field-row">
+            <input id="itemNameInput" list="itemNamesList" placeholder="Item name" autocomplete="off">
+            <datalist id="itemNamesList"></datalist>
+          </div>
+          <div class="field-row">
+            <input id="itemSizeInput" type="text" placeholder="Size">
+            <input id="itemColorInput" type="text" placeholder="Color">
+          </div>
+          <div class="field-row">
+            <input id="itemRateInput" type="number" placeholder="Rate (₹)" min="0" step="0.01">
+            <input id="itemQtyInput" type="number" placeholder="Qty" min="1" step="1" value="1">
+          </div>
+          <div class="field-row">
+            <input id="itemBarcodeInput" type="text" placeholder="Assign a barcode (optional)">
+          </div>
+          <button id="addItemBtn" class="btn btn-primary full-width">+ Add to Bill</button>
+        </div>
+      </div>
+
+      <div class="col-right">
+        <div class="card">
+          <div class="row-between">
+            <h3>Cart</h3>
+            <button id="toggleDiscountBtn" class="btn btn-link">▸ Discount</button>
+          </div>
+          <div class="table-scroll">
+            <table id="cartTable">
+              <thead>
+                <tr>
+                  <th>Item</th><th>Qty</th><th>Rate</th>
+                  <th class="discount-col hidden">Disc.</th>
+                  <th>Amount</th><th></th>
+                </tr>
+              </thead>
+              <tbody id="cartBody"></tbody>
+            </table>
+          </div>
+          <div id="emptyCartMsg" class="muted small center pad">Cart is empty. Scan or add an item.</div>
+
+          <div class="totals">
+            <div class="totals-row"><span>Subtotal</span><span id="subtotalVal">₹0.00</span></div>
+            <div class="totals-row discount-col hidden"><span>Total discount</span><span id="discountVal">₹0.00</span></div>
+            <div class="totals-row grand"><span>Grand Total</span><span id="grandTotalVal">₹0.00</span></div>
+          </div>
+
+          <div class="field-row">
+            <select id="paymentModeSelect">
+              <option>Cash</option>
+              <option>UPI</option>
+              <option>Card</option>
+            </select>
+          </div>
+          <button id="completeBillBtn" class="btn btn-success full-width big">Complete Bill</button>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ============================= INVENTORY ============================= -->
+  <section id="tab-inventory" class="tab-panel">
+    <div class="grid-3col">
+      <div class="card">
+        <div class="row-between"><h3>Categories</h3><button id="addCategoryBtn" class="btn btn-link">+ Add</button></div>
+        <ul id="categoryList" class="pick-list"></ul>
+      </div>
+      <div class="card">
+        <div class="row-between"><h3>Brands / Styles</h3><button id="addSubtypeBtn" class="btn btn-link">+ Add</button></div>
+        <ul id="subtypeList" class="pick-list"></ul>
+      </div>
+      <div class="card">
+        <div class="row-between">
+          <h3>Items</h3>
+          <button id="addItemInvBtn" class="btn btn-link">+ Add</button>
+        </div>
+        <input id="itemSearchInv" type="text" placeholder="Search items..." class="full-width">
+        <div class="table-scroll">
+          <table id="invItemsTable">
+            <thead><tr><th>Name</th><th>Size/Color</th><th>Rate</th><th>Stock</th><th></th></tr></thead>
+            <tbody id="invItemsBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= CUSTOMERS ============================= -->
+  <section id="tab-customers" class="tab-panel">
+    <div class="grid-2col">
+      <div class="col-left">
+        <div class="card">
+          <h3>Search customers</h3>
+          <input id="custSearchInput" type="text" placeholder="Search by name or phone..." class="full-width">
+          <ul id="customerList" class="pick-list"></ul>
+        </div>
+      </div>
+      <div class="col-right">
+        <div id="custDetailCard" class="card hidden">
+          <h3>Details</h3>
+          <div class="field-row">
+            <input id="detName" type="text" placeholder="Name">
+            <input id="detPhone" type="tel" placeholder="Phone">
+          </div>
+          <input id="detAddress" type="text" placeholder="Address" class="full-width">
+          <textarea id="detNotes" placeholder="Notes" class="full-width"></textarea>
+          <div class="field-row">
+            <button id="saveCustBtn" class="btn btn-primary">Save</button>
+            <button id="deleteCustBtn" class="btn btn-danger">Delete Customer</button>
+          </div>
+          <div id="custStatsLine" class="muted small"></div>
+
+          <h4>Purchase history</h4>
+          <div class="table-scroll">
+            <table id="custHistoryTable">
+              <thead><tr><th>Bill No</th><th>Date</th><th>Total</th><th></th></tr></thead>
+              <tbody id="custHistoryBody"></tbody>
+            </table>
+          </div>
+
+          <h4>Wishlist</h4>
+          <div class="field-row">
+            <input id="wishInput" type="text" placeholder="What are they looking for next?">
+            <button id="addWishBtn" class="btn">Add</button>
+          </div>
+          <ul id="wishList" class="pick-list"></ul>
+        </div>
+        <div id="custEmptyMsg" class="muted center pad">Select a customer to view details.</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= SALES ============================= -->
+  <section id="tab-sales" class="tab-panel">
+    <div class="card">
+      <div class="field-row">
+        <select id="salesQuickRange">
+          <option value="today">Today</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="month">This month</option>
+          <option value="all" selected>All time</option>
+        </select>
+        <input id="salesSearch" type="text" placeholder="Search bill no / customer...">
+        <button id="exportCsvBtn" class="btn">Export CSV</button>
+      </div>
+      <div class="table-scroll">
+        <table id="salesTable">
+          <thead><tr><th>Bill No</th><th>Date</th><th>Customer</th><th>Items</th><th>Total</th><th></th></tr></thead>
+          <tbody id="salesBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================= STATISTICS ============================= -->
+  <section id="tab-stats" class="tab-panel">
+    <div class="field-row">
+      <select id="statsQuickRange">
+        <option value="7">Last 7 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+        <option value="all">All time</option>
+      </select>
+    </div>
+    <div class="stat-cards" id="statCards"></div>
+    <div class="grid-2col">
+      <div class="card"><h3>Daily sales</h3><canvas id="dailyChart" height="180"></canvas></div>
+      <div class="card"><h3>Sales by category</h3><canvas id="categoryChart" height="180"></canvas></div>
+    </div>
+    <div class="card"><h3>Monthly sales (all-time)</h3><canvas id="monthlyChart" height="140"></canvas></div>
+    <div class="grid-2col">
+      <div class="card">
+        <div class="row-between">
+          <h3>Top items</h3>
+          <select id="topItemsBy"><option value="quantity">By quantity</option><option value="revenue">By revenue</option></select>
+        </div>
+        <table id="topItemsTable"><thead><tr><th>Item</th><th>Qty</th><th>Revenue</th></tr></thead><tbody id="topItemsBody"></tbody></table>
+      </div>
+      <div class="card">
+        <h3>Top customers</h3>
+        <table id="topCustTable"><thead><tr><th>Name</th><th>Visits</th><th>Spent</th></tr></thead><tbody id="topCustBody"></tbody></table>
+      </div>
+    </div>
+    <div class="card">
+      <h3>Open customer wishlist</h3>
+      <table id="wishlistStatTable"><thead><tr><th>Customer</th><th>Wants</th><th>Date</th></tr></thead><tbody id="wishlistStatBody"></tbody></table>
+    </div>
+  </section>
+
+</main>
+
+<!-- Receipt modal -->
+<div id="receiptModal" class="modal hidden">
+  <div class="modal-content">
+    <pre id="receiptText" class="receipt-pre"></pre>
+    <div class="field-row">
+      <button id="printReceiptBtn" class="btn btn-primary">Print</button>
+      <button id="closeReceiptBtn" class="btn">Close</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

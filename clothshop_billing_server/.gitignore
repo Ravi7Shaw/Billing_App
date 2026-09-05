@@ -1,0 +1,5 @@
+venv/
+backend/data/
+backend/logs/
+__pycache__/
+*.pyc
