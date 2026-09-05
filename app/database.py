@@ -157,9 +157,7 @@ class Database:
     # ---------------------------------------------------------- categories
     def get_categories(self):
         with self._conn() as conn:
-            return conn.execute(
-                "SELECT * FROM categories ORDER BY name"
-            ).fetchall()
+            return conn.execute("SELECT * FROM categories ORDER BY name").fetchall()
 
     def add_category(self, name: str):
         with self._conn() as conn:
@@ -201,7 +199,9 @@ class Database:
             conn.execute("DELETE FROM subtypes WHERE id=?", (subtype_id,))
 
     # --------------------------------------------------------------- items
-    def get_items(self, category_id=None, subtype_id=None, active_only=True, search=None):
+    def get_items(
+        self, category_id=None, subtype_id=None, active_only=True, search=None
+    ):
         q = """
             SELECT items.*, categories.name AS category_name,
                    subtypes.name AS subtype_name
@@ -261,7 +261,9 @@ class Database:
                 q += "AND subtype_id IS NULL"
             return conn.execute(q, params).fetchone()
 
-    def add_item(self, name, category_id, subtype_id, barcode, size, color, rate, stock_qty=0):
+    def add_item(
+        self, name, category_id, subtype_id, barcode, size, color, rate, stock_qty=0
+    ):
         with self._conn() as conn:
             cur = conn.execute(
                 """INSERT INTO items(name, category_id, subtype_id, barcode, size,
@@ -280,7 +282,19 @@ class Database:
             )
             return cur.lastrowid
 
-    def update_item(self, item_id, name, category_id, subtype_id, barcode, size, color, rate, stock_qty, active=1):
+    def update_item(
+        self,
+        item_id,
+        name,
+        category_id,
+        subtype_id,
+        barcode,
+        size,
+        color,
+        rate,
+        stock_qty,
+        active=1,
+    ):
         with self._conn() as conn:
             conn.execute(
                 """UPDATE items SET name=?, category_id=?, subtype_id=?, barcode=?,
@@ -331,15 +345,18 @@ class Database:
 
     def get_customer_by_id(self, cid):
         with self._conn() as conn:
-            return conn.execute(
-                "SELECT * FROM customers WHERE id=?", (cid,)
-            ).fetchone()
+            return conn.execute("SELECT * FROM customers WHERE id=?", (cid,)).fetchone()
 
     def add_customer(self, name, phone, address="", notes=""):
         with self._conn() as conn:
             cur = conn.execute(
                 "INSERT INTO customers(name, phone, address, notes) VALUES (?,?,?,?)",
-                (name.strip(), (phone.strip() if phone else None) or None, address, notes),
+                (
+                    name.strip(),
+                    (phone.strip() if phone else None) or None,
+                    address,
+                    notes,
+                ),
             )
             return cur.lastrowid
 
@@ -347,7 +364,13 @@ class Database:
         with self._conn() as conn:
             conn.execute(
                 "UPDATE customers SET name=?, phone=?, address=?, notes=? WHERE id=?",
-                (name.strip(), (phone.strip() if phone else None) or None, address, notes, cid),
+                (
+                    name.strip(),
+                    (phone.strip() if phone else None) or None,
+                    address,
+                    notes,
+                    cid,
+                ),
             )
 
     def delete_customer(self, cid):
@@ -416,12 +439,22 @@ class Database:
         today = datetime.now().strftime("%Y%m%d")
         with self._conn() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS c FROM bills WHERE bill_no LIKE ?", (f"INV-{today}-%",)
+                "SELECT COUNT(*) AS c FROM bills WHERE bill_no LIKE ?",
+                (f"INV-{today}-%",),
             ).fetchone()
             seq = row["c"] + 1
             return f"INV-{today}-{seq:03d}"
 
-    def save_bill(self, customer_id, items, subtotal, discount_percent, discount_amount, total, payment_mode):
+    def save_bill(
+        self,
+        customer_id,
+        items,
+        subtotal,
+        discount_percent,
+        discount_amount,
+        total,
+        payment_mode,
+    ):
         """items: list of dicts with item_id, name, category, quantity, rate, subtotal"""
         bill_no = self.next_bill_no()
         with self._conn() as conn:
@@ -429,7 +462,15 @@ class Database:
                 """INSERT INTO bills(bill_no, customer_id, subtotal, discount_percent,
                                       discount_amount, total, payment_mode)
                    VALUES (?,?,?,?,?,?,?)""",
-                (bill_no, customer_id, subtotal, discount_percent, discount_amount, total, payment_mode),
+                (
+                    bill_no,
+                    customer_id,
+                    subtotal,
+                    discount_percent,
+                    discount_amount,
+                    total,
+                    payment_mode,
+                ),
             )
             bill_id = cur.lastrowid
             for it in items:
@@ -529,7 +570,9 @@ class Database:
                 "revenue": row["revenue"],
                 "bill_count": row["bill_count"],
                 "pieces": pieces,
-                "avg_bill": (row["revenue"] / row["bill_count"]) if row["bill_count"] else 0,
+                "avg_bill": (row["revenue"] / row["bill_count"])
+                if row["bill_count"]
+                else 0,
             }
 
     def stat_daily_sales(self, date_from=None, date_to=None):

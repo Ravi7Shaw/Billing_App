@@ -5,7 +5,13 @@ A simple printable / PDF-exportable receipt dialog.
 """
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, QFileDialog, QMessageBox
+    QDialog,
+    QVBoxLayout,
+    QHBoxLayout,
+    QTextEdit,
+    QPushButton,
+    QFileDialog,
+    QMessageBox,
 )
 from PySide6.QtGui import QTextDocument, QFont
 from PySide6.QtPrintSupport import QPrinter, QPrintDialog
@@ -25,15 +31,17 @@ def build_receipt_text(bill_row, bill_items):
     lines.append("-" * width)
     lines.append(f"Bill No : {bill_row['bill_no']}")
     lines.append(f"Date    : {bill_row['bill_date']}")
-    cname = bill_row['customer_name'] if bill_row['customer_name'] else "Walk-in Customer"
+    cname = (
+        bill_row["customer_name"] if bill_row["customer_name"] else "Walk-in Customer"
+    )
     lines.append(f"Customer: {cname}")
-    if bill_row['customer_phone']:
+    if bill_row["customer_phone"]:
         lines.append(f"Phone   : {bill_row['customer_phone']}")
     lines.append("-" * width)
     lines.append(f"{'Item':<20}{'Qty':>4}{'Rate':>8}{'Amt':>10}")
     lines.append("-" * width)
     for it in bill_items:
-        name = it['item_name_snapshot']
+        name = it["item_name_snapshot"]
         if len(name) > 20:
             name = name[:17] + "..."
         lines.append(
@@ -41,8 +49,12 @@ def build_receipt_text(bill_row, bill_items):
         )
     lines.append("-" * width)
     lines.append(f"{'Subtotal:':<32}{bill_row['subtotal']:>10.2f}")
-    if bill_row['discount_amount']:
-        disc_label = f"Discount ({bill_row['discount_percent']:.0f}%):" if bill_row['discount_percent'] else "Discount:"
+    if bill_row["discount_amount"]:
+        disc_label = (
+            f"Discount ({bill_row['discount_percent']:.0f}%):"
+            if bill_row["discount_percent"]
+            else "Discount:"
+        )
         lines.append(f"{disc_label:<32}{bill_row['discount_amount']:>10.2f}")
     lines.append(f"{'TOTAL:':<32}{bill_row['total']:>10.2f}")
     lines.append(f"{'Payment:':<32}{bill_row['payment_mode']:>10}")
@@ -93,7 +105,10 @@ class ReceiptDialog(QDialog):
 
     def save_pdf(self):
         path, _ = QFileDialog.getSaveFileName(
-            self, "Save Receipt as PDF", f"{self.bill_row['bill_no']}.pdf", "PDF Files (*.pdf)"
+            self,
+            "Save Receipt as PDF",
+            f"{self.bill_row['bill_no']}.pdf",
+            "PDF Files (*.pdf)",
         )
         if not path:
             return
