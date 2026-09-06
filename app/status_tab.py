@@ -143,42 +143,76 @@ class StatusTab(QWidget):
             self.append_output("FastAPI server is already running on port 5000.")
             return
 
-        server_script = os.path.abspath(
-            os.path.join(
-                os.path.dirname(__file__),
-                "..",
-                "clothshop_billing_server",
-                "run_server.py",
+        # --------------------------------------------------------------
+        # Choose how to start the server
+        # --------------------------------------------------------------
+        if getattr(sys, "frozen", False):
+            # Running from the PyInstaller EXE.
+            # Start the same EXE in server mode.
+            program = sys.executable
+            arguments = ["--run-server"]
+            working_directory = os.path.dirname(sys.executable)
+
+            self.append_output(
+                "Starting FastAPI server from BillingApp.exe..."
             )
-        )
 
-        if not os.path.exists(server_script):
-            self.append_output(f"ERROR: Server script not found:\n{server_script}")
-            return
+        else:
+            # Running normally from Python source.
+            server_script = os.path.abspath(
+                os.path.join(
+                    os.path.dirname(__file__),
+                    "..",
+                    "clothshop_billing_server",
+                    "run_server.py",
+                )
+            )
 
+            if not os.path.exists(server_script):
+                self.append_output(
+                    f"ERROR: Server script not found:\n{server_script}"
+                )
+                return
+
+            program = sys.executable
+            arguments = [server_script]
+            working_directory = os.path.dirname(server_script)
+
+            self.append_output(
+                f"Starting FastAPI server:\n{server_script}\n"
+            )
+
+        # --------------------------------------------------------------
+        # Start process
+        # --------------------------------------------------------------
         self.server_process = QProcess(self)
 
-        self.server_process.setProgram(sys.executable)
-        self.server_process.setArguments([server_script])
-
-        self.server_process.setWorkingDirectory(os.path.dirname(server_script))
+        self.server_process.setProgram(program)
+        self.server_process.setArguments(arguments)
+        self.server_process.setWorkingDirectory(working_directory)
 
         self.server_process.setProcessChannelMode(
             QProcess.ProcessChannelMode.MergedChannels
         )
 
-        self.server_process.readyReadStandardOutput.connect(self.read_server_output)
+        self.server_process.readyReadStandardOutput.connect(
+            self.read_server_output
+        )
 
-        self.server_process.finished.connect(self.server_finished)
+        self.server_process.finished.connect(
+            self.server_finished
+        )
 
-        self.server_process.errorOccurred.connect(self.server_error)
-
-        self.append_output(f"Starting FastAPI server:\n{server_script}\n")
+        self.server_process.errorOccurred.connect(
+            self.server_error
+        )
 
         self.server_process.start()
 
         if not self.server_process.waitForStarted(3000):
-            self.append_output("ERROR: FastAPI server failed to start.")
+            self.append_output(
+                "ERROR: FastAPI server failed to start."
+            )
             self.server_process = None
             return
 

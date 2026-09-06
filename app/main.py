@@ -100,14 +100,46 @@ class MainWindow(QMainWindow):
             self.customers_tab._refresh_customer_list()
 
 
+def run_bundled_server():
+    if getattr(sys, "frozen", False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+    server_root = os.path.join(base_path, "clothshop_billing_server")
+
+    backend_dir = os.path.join(server_root, "backend")
+
+    sys.path.insert(0, backend_dir)
+    sys.path.insert(0, server_root)
+
+    import run_server
+
+    run_server.main()
+
+
 def main():
+    # --------------------------------------------------------------
+    # FastAPI server mode
+    # --------------------------------------------------------------
+    if "--run-server" in sys.argv:
+        run_bundled_server()
+        return
+
+    # --------------------------------------------------------------
+    # Normal desktop GUI mode
+    # --------------------------------------------------------------
     app = QApplication(sys.argv)
+
     app.setStyleSheet(STYLESHEET)
     app.setApplicationName("Cloth Shop Billing System")
+
     if os.path.exists(APP_ICON_PATH):
         app.setWindowIcon(QIcon(APP_ICON_PATH))
+
     window = MainWindow()
     window.show()
+
     sys.exit(app.exec())
 
 
