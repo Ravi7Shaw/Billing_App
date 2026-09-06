@@ -274,8 +274,10 @@ class BillingTab(QWidget):
         row3 = QHBoxLayout()
         row3.addWidget(QLabel("Payment:"))
         self.payment_mode_combo = QComboBox()
+
         # Bill date
         date_row = QHBoxLayout()
+
         date_row.addWidget(QLabel("Bill date:"))
 
         self.bill_date_input = QDateEdit()
@@ -286,10 +288,22 @@ class BillingTab(QWidget):
         self.bill_date_input.setMaximumDate(QDate.currentDate())
 
         self.bill_date_input.setDisplayFormat("dd/MM/yyyy")
+
         date_row.addWidget(self.bill_date_input)
+
+        # Quick button for the cashier to return to today's date.
+        today_btn = QPushButton("Today")
+        today_btn.setProperty("role", "secondary")
+        today_btn.setToolTip("Set bill date to today")
+        today_btn.clicked.connect(
+            lambda: self.bill_date_input.setDate(QDate.currentDate())
+        )
+
+        date_row.addWidget(today_btn)
         date_row.addStretch()
 
         v.addLayout(date_row)
+
         self.payment_mode_combo.addItems(["Cash", "Card", "UPI", "Other"])
         row3.addWidget(self.payment_mode_combo)
         row3.addStretch()
