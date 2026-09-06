@@ -96,14 +96,19 @@
             <div class="totals-row grand"><span>Grand Total</span><span id="grandTotalVal">₹0.00</span></div>
           </div>
 
-          <div class="field-row">
-            <select id="paymentModeSelect">
-              <option>Cash</option>
-              <option>UPI</option>
-              <option>Card</option>
-            </select>
-          </div>
-          <button id="completeBillBtn" class="btn btn-success full-width big">Complete Bill</button>
+            <div class="field-row">
+  <label for="billDateInput">Bill Date</label>
+  <input
+    id="billDateInput"
+    type="date"
+  >
+
+  <select id="paymentModeSelect">
+    <option>Cash</option>
+    <option>UPI</option>
+    <option>Card</option>
+  </select>
+</div>       <button id="completeBillBtn" class="btn btn-success full-width big">Complete Bill</button>
         </div>
       </div>
 
@@ -138,50 +143,226 @@
   </section>
 
   <!-- ============================= CUSTOMERS ============================= -->
-  <section id="tab-customers" class="tab-panel">
-    <div class="grid-2col">
-      <div class="col-left">
-        <div class="card">
-          <h3>Search customers</h3>
-          <input id="custSearchInput" type="text" placeholder="Search by name or phone..." class="full-width">
-          <ul id="customerList" class="pick-list"></ul>
-        </div>
-      </div>
-      <div class="col-right">
-        <div id="custDetailCard" class="card hidden">
-          <h3>Details</h3>
-          <div class="field-row">
-            <input id="detName" type="text" placeholder="Name">
-            <input id="detPhone" type="tel" placeholder="Phone">
-          </div>
-          <input id="detAddress" type="text" placeholder="Address" class="full-width">
-          <textarea id="detNotes" placeholder="Notes" class="full-width"></textarea>
-          <div class="field-row">
-            <button id="saveCustBtn" class="btn btn-primary">Save</button>
-            <button id="deleteCustBtn" class="btn btn-danger">Delete Customer</button>
-          </div>
-          <div id="custStatsLine" class="muted small"></div>
+<!-- ============================= CUSTOMERS ============================= -->
 
-          <h4>Purchase history</h4>
-          <div class="table-scroll">
-            <table id="custHistoryTable">
-              <thead><tr><th>Bill No</th><th>Date</th><th>Total</th><th></th></tr></thead>
-              <tbody id="custHistoryBody"></tbody>
-            </table>
-          </div>
+<section id="tab-customers" class="tab-panel">
 
-          <h4>Wishlist</h4>
-          <div class="field-row">
-            <input id="wishInput" type="text" placeholder="What are they looking for next?">
-            <button id="addWishBtn" class="btn">Add</button>
-          </div>
-          <ul id="wishList" class="pick-list"></ul>
+  <div class="grid-2col">
+
+    <!-- =========================================================
+         CUSTOMER LIST
+         ========================================================= -->
+
+    <div class="col-left">
+
+      <div class="card">
+
+        <div class="row-between">
+
+          <h3>Customers</h3>
+
+          <button
+            id="newCustomerBtn"
+            class="btn btn-primary"
+          >
+            + New Customer
+          </button>
+
         </div>
-        <div id="custEmptyMsg" class="muted center pad">Select a customer to view details.</div>
+
+        <input
+          id="custSearchInput"
+          type="text"
+          placeholder="Search by name or phone..."
+          class="full-width"
+        >
+
+        <ul
+          id="customerList"
+          class="pick-list"
+        ></ul>
+
       </div>
+
     </div>
-  </section>
 
+
+    <!-- =========================================================
+         CUSTOMER DETAILS
+         ========================================================= -->
+
+    <div class="col-right">
+
+      <div
+        id="custDetailCard"
+        class="card hidden"
+      >
+
+        <div class="row-between">
+
+          <h3>Details</h3>
+
+        </div>
+
+
+        <!-- Name + Phone -->
+
+        <div class="field-row">
+
+          <input
+            id="detName"
+            type="text"
+            placeholder="Name"
+          >
+
+          <input
+            id="detPhone"
+            type="tel"
+            placeholder="Phone"
+          >
+
+        </div>
+
+
+        <!-- Address -->
+
+        <input
+          id="detAddress"
+          type="text"
+          placeholder="Address"
+          class="full-width"
+        >
+
+
+        <!-- Notes -->
+
+        <textarea
+          id="detNotes"
+          placeholder="Notes"
+          class="full-width"
+        ></textarea>
+
+
+        <!-- Buttons -->
+
+        <div class="field-row">
+
+          <button
+            id="saveCustBtn"
+            class="btn btn-primary"
+          >
+            Save
+          </button>
+
+          <button
+            id="deleteCustBtn"
+            class="btn btn-danger"
+          >
+            Delete Customer
+          </button>
+
+        </div>
+
+
+        <!-- Customer statistics -->
+
+        <div
+          id="custStatsLine"
+          class="muted small"
+        ></div>
+
+
+        <!-- =====================================================
+             PURCHASE HISTORY
+             ===================================================== -->
+
+        <h4>
+          Purchase history
+        </h4>
+
+        <div class="table-scroll">
+
+          <table id="custHistoryTable">
+
+            <thead>
+
+              <tr>
+
+                <th>
+                  Bill No
+                </th>
+
+                <th>
+                  Date
+                </th>
+
+                <th>
+                  Total
+                </th>
+
+                <th>
+                </th>
+
+              </tr>
+
+            </thead>
+
+            <tbody
+              id="custHistoryBody"
+            ></tbody>
+
+          </table>
+
+        </div>
+
+
+        <!-- =====================================================
+             WISHLIST
+             ===================================================== -->
+
+        <h4>
+          Wishlist
+        </h4>
+
+        <div class="field-row">
+
+          <input
+            id="wishInput"
+            type="text"
+            placeholder="What are they looking for next?"
+          >
+
+          <button
+            id="addWishBtn"
+            class="btn"
+          >
+            Add
+          </button>
+
+        </div>
+
+        <ul
+          id="wishList"
+          class="pick-list"
+        ></ul>
+
+      </div>
+
+
+      <!-- No customer selected -->
+
+      <div
+        id="custEmptyMsg"
+        class="muted center pad"
+      >
+        Select a customer to view details.
+      </div>
+
+    </div>
+
+  </div>
+
+</section>
   <!-- ============================= SALES ============================= -->
   <section id="tab-sales" class="tab-panel">
     <div class="card">

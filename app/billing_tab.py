@@ -7,11 +7,27 @@ and a discount panel that stays hidden until the cashier explicitly opens it.
 """
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QGroupBox, QLabel,
-    QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPushButton, QTableWidget,
-    QTableWidgetItem, QHeaderView, QMessageBox, QFrame, QCompleter, QScrollArea
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QFormLayout,
+    QGroupBox,
+    QLabel,
+    QLineEdit,
+    QComboBox,
+    QSpinBox,
+    QDoubleSpinBox,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QHeaderView,
+    QMessageBox,
+    QFrame,
+    QCompleter,
+    QScrollArea,
+    QDateEdit,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate
 
 from widgets import rupees, EditableSearchCombo, divider, make_heading
 from receipt import ReceiptDialog
@@ -25,10 +41,12 @@ class BillingTab(QWidget):
         self.db = db
         self.on_bill_saved = on_bill_saved  # callback so other tabs can refresh
 
-        self.cart = []            # list of dicts: item_id, name, category, qty, rate, amount, discount
-        self.matched_customer = None   # sqlite3.Row or None
+        self.cart = []  # list of dicts: item_id, name, category, qty, rate, amount, discount
+        self.matched_customer = None  # sqlite3.Row or None
         self.current_items_by_name = {}  # lower(name) -> item row, for the active category/subtype
-        self.discount_visible = False  # discount column/total stays hidden until toggled open
+        self.discount_visible = (
+            False  # discount column/total stays hidden until toggled open
+        )
 
         self._build_ui()
         self._refresh_categories()
@@ -40,7 +58,9 @@ class BillingTab(QWidget):
         outer.setContentsMargins(16, 16, 16, 16)
         outer.setSpacing(12)
 
-        outer.addWidget(make_heading("New Bill", "Scan a barcode or enter items manually"))
+        outer.addWidget(
+            make_heading("New Bill", "Scan a barcode or enter items manually")
+        )
 
         content = QHBoxLayout()
         content.setSpacing(14)
@@ -62,7 +82,9 @@ class BillingTab(QWidget):
         left_scroll.setWidget(left_widget)
         left_scroll.setMaximumWidth(450)
         left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        left_scroll.setStyleSheet("QScrollArea { border: none; background: transparent; }")
+        left_scroll.setStyleSheet(
+            "QScrollArea { border: none; background: transparent; }"
+        )
         content.addWidget(left_scroll)
 
         left.addWidget(self._build_customer_box())
@@ -109,7 +131,9 @@ class BillingTab(QWidget):
         form.addWidget(self.customer_info_label)
 
         self.wishlist_input = QLineEdit()
-        self.wishlist_input.setPlaceholderText("What do they want next time? (optional)")
+        self.wishlist_input.setPlaceholderText(
+            "What do they want next time? (optional)"
+        )
         form.addWidget(self.wishlist_input)
 
         clear_btn = QPushButton("New / Clear Customer")
@@ -164,7 +188,9 @@ class BillingTab(QWidget):
         form.addRow("Size / Color:", size_color_row)
 
         self.new_barcode_input = QLineEdit()
-        self.new_barcode_input.setPlaceholderText("Assign a barcode for next time (optional)")
+        self.new_barcode_input.setPlaceholderText(
+            "Assign a barcode for next time (optional)"
+        )
         form.addRow("Barcode:", self.new_barcode_input)
 
         self.rate_input = QDoubleSpinBox()
@@ -248,6 +274,22 @@ class BillingTab(QWidget):
         row3 = QHBoxLayout()
         row3.addWidget(QLabel("Payment:"))
         self.payment_mode_combo = QComboBox()
+        # Bill date
+        date_row = QHBoxLayout()
+        date_row.addWidget(QLabel("Bill date:"))
+
+        self.bill_date_input = QDateEdit()
+        self.bill_date_input.setCalendarPopup(True)
+        self.bill_date_input.setDate(QDate.currentDate())
+
+        # Historical bills are allowed, but future bills are not.
+        self.bill_date_input.setMaximumDate(QDate.currentDate())
+
+        self.bill_date_input.setDisplayFormat("dd/MM/yyyy")
+        date_row.addWidget(self.bill_date_input)
+        date_row.addStretch()
+
+        v.addLayout(date_row)
         self.payment_mode_combo.addItems(["Cash", "Card", "UPI", "Other"])
         row3.addWidget(self.payment_mode_combo)
         row3.addStretch()
@@ -300,15 +342,21 @@ class BillingTab(QWidget):
 
             total_spent, visit_count = self.db.get_customer_total_spent(customer["id"])
             wishlist = self.db.get_wishlist(customer["id"])
-            info_lines = [f"Returning customer \u2022 {visit_count} visit(s) \u2022 {rupees(total_spent)} spent"]
-            open_wishes = [w["item_description"] for w in wishlist if not w["fulfilled"]]
+            info_lines = [
+                f"Returning customer \u2022 {visit_count} visit(s) \u2022 {rupees(total_spent)} spent"
+            ]
+            open_wishes = [
+                w["item_description"] for w in wishlist if not w["fulfilled"]
+            ]
             if open_wishes:
                 info_lines.append("Wants: " + "; ".join(open_wishes))
             self.customer_info_label.setText("\n".join(info_lines))
             self.customer_info_label.setVisible(True)
         else:
             self.matched_customer = None
-            self.customer_info_label.setText("New customer \u2014 will be added on save")
+            self.customer_info_label.setText(
+                "New customer \u2014 will be added on save"
+            )
             self.customer_info_label.setVisible(True)
 
     def _clear_customer(self):
@@ -375,7 +423,9 @@ class BillingTab(QWidget):
             return
         items = self.db.get_items(category_id=cat_id, subtype_id=subtype_id)
         self.current_items_by_name = {i["name"].lower(): i for i in items}
-        self.item_name_combo.set_items(sorted(self.current_items_by_name_display(items)))
+        self.item_name_combo.set_items(
+            sorted(self.current_items_by_name_display(items))
+        )
 
     def current_items_by_name_display(self, items):
         return [i["name"] for i in items]
@@ -400,14 +450,20 @@ class BillingTab(QWidget):
         qty = self.qty_input.value()
 
         if cat_id is None:
-            QMessageBox.warning(self, "Missing info", "Please choose a category first.\n"
-                                 "(Add one from the Inventory tab if the list is empty.)")
+            QMessageBox.warning(
+                self,
+                "Missing info",
+                "Please choose a category first.\n"
+                "(Add one from the Inventory tab if the list is empty.)",
+            )
             return
         if not name:
             QMessageBox.warning(self, "Missing info", "Please type an item name.")
             return
         if rate <= 0:
-            QMessageBox.warning(self, "Missing info", "Please enter a rate greater than 0.")
+            QMessageBox.warning(
+                self, "Missing info", "Please enter a rate greater than 0."
+            )
             return
 
         existing = self.db.find_item_by_name(cat_id, subtype_id, name)
@@ -415,24 +471,34 @@ class BillingTab(QWidget):
             item_id = existing["id"]
             # Keep the catalog rate/details current if the cashier changed them.
             self.db.update_item(
-                item_id, name, cat_id, subtype_id,
+                item_id,
+                name,
+                cat_id,
+                subtype_id,
                 self.new_barcode_input.text() or existing["barcode"],
                 self.size_input.text() or existing["size"],
                 self.color_input.text() or existing["color"],
-                rate, existing["stock_qty"],
+                rate,
+                existing["stock_qty"],
             )
         else:
             # Not seen before -> save it to the catalog so it's recommended
             # automatically next time (this is how "don't hardcode anything"
             # is honoured: the catalog grows from real entries).
             item_id = self.db.add_item(
-                name, cat_id, subtype_id,
+                name,
+                cat_id,
+                subtype_id,
                 self.new_barcode_input.text(),
-                self.size_input.text(), self.color_input.text(),
-                rate, 0,
+                self.size_input.text(),
+                self.color_input.text(),
+                rate,
+                0,
             )
 
-        self._add_to_cart(item_id=item_id, name=name, category=cat_name, qty=qty, rate=rate)
+        self._add_to_cart(
+            item_id=item_id, name=name, category=cat_name, qty=qty, rate=rate
+        )
 
         # Reset just the item-specific fields; keep category/brand selected
         # for fast repeated entry of the same style.
@@ -455,10 +521,17 @@ class BillingTab(QWidget):
                 self._render_cart()
                 self._recalculate_totals()
                 return
-        self.cart.append({
-            "item_id": item_id, "name": name, "category": category,
-            "qty": qty, "rate": rate, "amount": qty * rate, "discount": 0.0,
-        })
+        self.cart.append(
+            {
+                "item_id": item_id,
+                "name": name,
+                "category": category,
+                "qty": qty,
+                "rate": rate,
+                "amount": qty * rate,
+                "discount": 0.0,
+            }
+        )
         self._render_cart()
         self._recalculate_totals()
 
@@ -500,7 +573,9 @@ class BillingTab(QWidget):
             self.cart_table.setHorizontalHeaderLabels(
                 ["Item", "Category", "Qty", "Rate", "Amount", "Discount", ""]
             )
-            self.cart_table.horizontalHeader().setSectionResizeMode(6, QHeaderView.Fixed)
+            self.cart_table.horizontalHeader().setSectionResizeMode(
+                6, QHeaderView.Fixed
+            )
             self.cart_table.setColumnWidth(6, 90)
             self.cart_table.verticalHeader().setDefaultSectionSize(40)
         for row_idx in range(self.cart_table.rowCount()):
@@ -526,24 +601,34 @@ class BillingTab(QWidget):
             if col == 2:  # qty
                 new_qty = max(1, int(float(table_item.text())))
                 self.cart[row_idx]["qty"] = new_qty
-                self.cart[row_idx]["amount"] = self.cart[row_idx]["qty"] * self.cart[row_idx]["rate"]
+                self.cart[row_idx]["amount"] = (
+                    self.cart[row_idx]["qty"] * self.cart[row_idx]["rate"]
+                )
             elif col == 3:  # rate
                 new_rate = max(0.0, float(table_item.text()))
                 self.cart[row_idx]["rate"] = new_rate
-                self.cart[row_idx]["amount"] = self.cart[row_idx]["qty"] * self.cart[row_idx]["rate"]
+                self.cart[row_idx]["amount"] = (
+                    self.cart[row_idx]["qty"] * self.cart[row_idx]["rate"]
+                )
             elif col == 5:  # discount
                 new_discount = max(0.0, float(table_item.text()))
-                self.cart[row_idx]["discount"] = min(new_discount, self.cart[row_idx]["amount"])
+                self.cart[row_idx]["discount"] = min(
+                    new_discount, self.cart[row_idx]["amount"]
+                )
         except ValueError:
             pass
-        self.cart[row_idx]["discount"] = min(self.cart[row_idx]["discount"], self.cart[row_idx]["amount"])
+        self.cart[row_idx]["discount"] = min(
+            self.cart[row_idx]["discount"], self.cart[row_idx]["amount"]
+        )
         self._render_cart()
         self._recalculate_totals()
 
     # --------------------------------------------------------------- totals
     def _toggle_discount_visibility(self):
         self.discount_visible = not self.discount_visible
-        self.discount_arrow_btn.setText("\u25be Discount" if self.discount_visible else "\u25b8 Discount")
+        self.discount_arrow_btn.setText(
+            "\u25be Discount" if self.discount_visible else "\u25b8 Discount"
+        )
         self.cart_table.setColumnHidden(5, not self.discount_visible)
         self.discount_total_row.setVisible(self.discount_visible)
 
@@ -562,13 +647,17 @@ class BillingTab(QWidget):
         discount_total = self._total_discount()
         total = self._grand_total()
         self.subtotal_label.setText(f"Subtotal (before discount): {rupees(subtotal)}")
-        self.discount_total_label.setText(f"Total discount given: -{rupees(discount_total)}")
+        self.discount_total_label.setText(
+            f"Total discount given: -{rupees(discount_total)}"
+        )
         self.total_label.setText(f"Total to Pay: {rupees(total)}")
 
     # ---------------------------------------------------------- completion
     def _complete_bill(self):
         if not self.cart:
-            QMessageBox.warning(self, "Empty bill", "Add at least one item before completing the bill.")
+            QMessageBox.warning(
+                self, "Empty bill", "Add at least one item before completing the bill."
+            )
             return
 
         phone = self.phone_input.text().strip()
@@ -579,12 +668,18 @@ class BillingTab(QWidget):
         customer_id = None
         if phone or name:
             if not name:
-                QMessageBox.warning(self, "Missing info", "Please enter the customer's name, or leave both name and phone blank for a walk-in sale.")
+                QMessageBox.warning(
+                    self,
+                    "Missing info",
+                    "Please enter the customer's name, or leave both name and phone blank for a walk-in sale.",
+                )
                 return
             existing = self.db.get_customer_by_phone(phone) if phone else None
             if existing:
                 customer_id = existing["id"]
-                self.db.update_customer(customer_id, name, phone, address, existing["notes"] or "")
+                self.db.update_customer(
+                    customer_id, name, phone, address, existing["notes"] or ""
+                )
             else:
                 customer_id = self.db.add_customer(name, phone, address, "")
 
@@ -593,6 +688,7 @@ class BillingTab(QWidget):
         total = self._grand_total()
         percent = (discount_amount / subtotal * 100.0) if subtotal else 0.0
         payment_mode = self.payment_mode_combo.currentText()
+        bill_date = self.bill_date_input.date().toString("yyyy-MM-dd")
 
         bill_items = [
             {
@@ -601,13 +697,21 @@ class BillingTab(QWidget):
                 "category": row["category"],
                 "quantity": row["qty"],
                 "rate": row["rate"],
-                "subtotal": row["amount"] - row["discount"],  # net amount charged for this line
+                "subtotal": row["amount"]
+                - row["discount"],  # net amount charged for this line
             }
             for row in self.cart
         ]
 
         bill_id, bill_no = self.db.save_bill(
-            customer_id, bill_items, subtotal, percent, discount_amount, total, payment_mode
+            customer_id,
+            bill_items,
+            subtotal,
+            percent,
+            discount_amount,
+            total,
+            payment_mode,
+            bill_date,
         )
 
         if wishlist_note and customer_id:

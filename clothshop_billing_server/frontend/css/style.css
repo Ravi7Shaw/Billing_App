@@ -172,3 +172,25 @@ td input { width: 60px; padding: 4px 6px; font-size: 0.85rem; }
   #receiptModal { position: absolute; inset: 0; background: white; }
   #printReceiptBtn, #closeReceiptBtn { display: none; }
 }
+
+/* ============================================================
+   Customers - New Customer button alignment
+   ============================================================ */
+
+#tab-customers .row-between {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+#tab-customers .row-between h3 {
+    margin: 0;
+}
+
+#tab-customers #newCustomerBtn {
+    width: auto;
+    min-width: 138px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}

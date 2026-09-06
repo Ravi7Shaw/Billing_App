@@ -10,7 +10,13 @@ Run with:
 import os
 import sys
 
-from PySide6.QtWidgets import QApplication, QMainWindow, QTabWidget, QWidget, QVBoxLayout
+from PySide6.QtWidgets import (
+    QApplication,
+    QMainWindow,
+    QTabWidget,
+    QWidget,
+    QVBoxLayout,
+)
 from PySide6.QtGui import QIcon
 
 from database import Database
@@ -19,6 +25,7 @@ from billing_tab import BillingTab
 from inventory_tab import InventoryTab
 from customers_tab import CustomersTab
 from sales_tab import SalesTab
+from status_tab import StatusTab
 from stats_tab import StatsTab
 
 
@@ -53,10 +60,13 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         layout.addWidget(self.tabs)
 
+        self.status_tab = StatusTab()
         self.customers_tab = CustomersTab(self.db)
         self.sales_tab = SalesTab(self.db)
         self.stats_tab = StatsTab(self.db)
-        self.inventory_tab = InventoryTab(self.db, on_catalog_changed=self._on_catalog_changed)
+        self.inventory_tab = InventoryTab(
+            self.db, on_catalog_changed=self._on_catalog_changed
+        )
         self.billing_tab = BillingTab(self.db, on_bill_saved=self._on_bill_saved)
 
         self.tabs.addTab(self.billing_tab, "New Bill")
@@ -64,11 +74,16 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.customers_tab, "Customers")
         self.tabs.addTab(self.sales_tab, "Sales History")
         self.tabs.addTab(self.stats_tab, "Statistics")
+        self.tabs.addTab(self.status_tab, "Application Status")
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
     def _on_catalog_changed(self):
         self.billing_tab.refresh_catalog()
+
+    def closeEvent(self, event):
+        self.status_tab.shutdown_server()
+        event.accept()
 
     def _on_bill_saved(self):
         self.sales_tab.refresh()

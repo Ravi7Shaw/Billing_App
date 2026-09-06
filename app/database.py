@@ -127,12 +127,20 @@ class Database:
 
     @contextmanager
     def _conn(self):
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
+
         conn.execute("PRAGMA foreign_keys = ON")
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = FULL")
+        conn.execute("PRAGMA busy_timeout = 10000")
+
         try:
             yield conn
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -193,6 +201,30 @@ class Database:
             conn.execute(
                 "UPDATE subtypes SET name=? WHERE id=?", (new_name.strip(), subtype_id)
             )
+
+    def _next_bill_no_conn(self, conn, bill_date=None):
+        if bill_date is None:
+            bill_date = datetime.now().strftime("%Y-%m-%d")
+
+        date_key = bill_date.replace("-", "")
+        prefix = f"INV-{date_key}-"
+
+        row = conn.execute(
+            """
+            SELECT COALESCE(
+                MAX(CAST(substr(bill_no, ?) AS INTEGER)),
+                0
+            ) AS max_seq
+            FROM bills
+            WHERE bill_no LIKE ?
+            """,
+            (
+                len(prefix) + 1,
+                f"{prefix}%",
+            ),
+        ).fetchone()
+
+        return f"{prefix}{row['max_seq'] + 1:03d}"
 
     def delete_subtype(self, subtype_id: int):
         with self._conn() as conn:
@@ -436,25 +468,9 @@ class Database:
 
     # -------------------------------------------------------------- bills
 
-    def next_bill_no(self):
-        today = datetime.now().strftime("%Y%m%d")
-        prefix = f"INV-{today}-"
-
+    def next_bill_no(self, bill_date=None):
         with self._conn() as conn:
-            row = conn.execute(
-                """
-                SELECT COALESCE(
-                MAX(CAST(substr(bill_no, ?) AS INTEGER)),
-                0
-                ) AS max_seq
-                FROM bills
-                WHERE bill_no LIKE ?
-                """,
-                (len(prefix) + 1, f"{prefix}%"),
-            ).fetchone()
-
-        seq = row["max_seq"] + 1
-        return f"{prefix}{seq:03d}"
+            return self._next_bill_no_conn(conn, bill_date)
 
     def save_bill(
         self,
@@ -465,17 +481,54 @@ class Database:
         discount_amount,
         total,
         payment_mode,
+        bill_date=None,
     ):
-        """items: list of dicts with item_id, name, category, quantity, rate, subtotal"""
-        bill_no = self.next_bill_no()
+        """
+        Save an entire bill as one atomic transaction.
+
+        bill_date:
+            YYYY-MM-DD
+            Defaults to today.
+        """
+
+        if not items:
+            raise ValueError("Cannot save an empty bill.")
+
+        if bill_date is None:
+            bill_date = datetime.now().strftime("%Y-%m-%d")
+
+        # Validate the date before touching the database.
+        try:
+            datetime.strptime(bill_date, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("Invalid bill date. Expected YYYY-MM-DD.")
+
         with self._conn() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+
+            bill_no = self._next_bill_no_conn(
+                conn,
+                bill_date,
+            )
+
             cur = conn.execute(
-                """INSERT INTO bills(bill_no, customer_id, subtotal, discount_percent,
-                                      discount_amount, total, payment_mode)
-                   VALUES (?,?,?,?,?,?,?)""",
+                """
+                INSERT INTO bills(
+                    bill_no,
+                    customer_id,
+                    bill_date,
+                    subtotal,
+                    discount_percent,
+                    discount_amount,
+                    total,
+                    payment_mode
+                )
+                VALUES (?,?,?,?,?,?,?,?)
+                """,
                 (
                     bill_no,
                     customer_id,
+                    bill_date,
                     subtotal,
                     discount_percent,
                     discount_amount,
@@ -483,27 +536,55 @@ class Database:
                     payment_mode,
                 ),
             )
+
             bill_id = cur.lastrowid
+
             for it in items:
+                quantity = it["quantity"]
+
+                if quantity <= 0:
+                    raise ValueError(f"Invalid quantity for item: {it['name']}")
+
                 conn.execute(
-                    """INSERT INTO bill_items(bill_id, item_id, item_name_snapshot,
-                            category_snapshot, quantity, rate, subtotal)
-                       VALUES (?,?,?,?,?,?,?)""",
+                    """
+                    INSERT INTO bill_items(
+                        bill_id,
+                        item_id,
+                        item_name_snapshot,
+                        category_snapshot,
+                        quantity,
+                        rate,
+                        subtotal
+                    )
+                    VALUES (?,?,?,?,?,?,?)
+                    """,
                     (
                         bill_id,
                         it.get("item_id"),
                         it["name"],
-                        it.get("category"),
-                        it["quantity"],
+                        it.get("category", ""),
+                        quantity,
                         it["rate"],
                         it["subtotal"],
                     ),
                 )
+
+                # IMPORTANT:
+                # We deliberately do NOT block a bill because of
+                # recorded stock quantity.
                 if it.get("item_id"):
                     conn.execute(
-                        "UPDATE items SET stock_qty = MAX(stock_qty - ?, 0) WHERE id=?",
-                        (it["quantity"], it["item_id"]),
+                        """
+                        UPDATE items
+                        SET stock_qty = MAX(stock_qty - ?, 0)
+                        WHERE id = ?
+                        """,
+                        (
+                            quantity,
+                            it["item_id"],
+                        ),
                     )
+
             return bill_id, bill_no
 
     def get_bill(self, bill_id):

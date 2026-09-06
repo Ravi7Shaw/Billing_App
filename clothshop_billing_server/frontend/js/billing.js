@@ -11,6 +11,10 @@ let discountVisible = false;
 const $ = (id) => document.getElementById(id);
 
 export async function initBilling() {
+    const today = getLocalDateISO();
+
+  $("billDateInput").value = today;
+  $("billDateInput").max = today;
   categories = await api.getCategories();
   const catSel = $("categorySelect");
   catSel.innerHTML = categories.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
@@ -25,6 +29,15 @@ export async function initBilling() {
   $("custPhone").addEventListener("blur", lookupCustomerByPhone);
 
   renderCart();
+}
+
+function getLocalDateISO() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+
+  return new Date(
+    now.getTime() - offset * 60 * 1000
+  ).toISOString().slice(0, 10);
 }
 
 async function onCategoryChanged() {
@@ -230,11 +243,18 @@ async function completeBill() {
   }));
 
   const paymentMode = $("paymentModeSelect").value;
+  const billDate = $("billDateInput").value;
+
+  if (!billDate) {
+    toast("Select a bill date", true);
+    return;
+  }
+
 
   const result = await api.saveBill({
     customer_id: customerId, items, subtotal: sub,
     discount_percent: discountPercent, discount_amount: disc,
-    total, payment_mode: paymentMode,
+    total, payment_mode: paymentMode,bill_date:billDate,
   });
 
   toast(`Bill ${result.bill_no} saved`);

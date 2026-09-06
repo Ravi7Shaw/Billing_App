@@ -46,23 +46,30 @@ def get_lan_ip() -> str:
         s.close()
 
 
-def show_qr(url: str, save_path: str):
-    try:
-        import qrcode
-    except ImportError:
-        print("  (Install `qrcode[pil]` to also get a QR code: pip install -r backend/requirements.txt)")
-        return
-    qr = qrcode.QRCode(border=1)
+def show_qr(url):
+    import qrcode
+
+    qr = qrcode.QRCode(
+        version=None,
+        error_correction=qrcode.constants.ERROR_CORRECT_M,
+        box_size=10,
+        border=4,
+    )
+
     qr.add_data(url)
-    qr.make()
-    qr.print_ascii(invert=True)
-    try:
-        img = qr.make_image()
-        img.save(save_path)
-        print(f"  QR code image also saved to: {save_path}")
-        print("  (print it and keep it at the billing counter)")
-    except Exception as e:
-        print(f"  (could not save QR image: {e})")
+    qr.make(fit=True)
+
+    img = qr.make_image()
+
+    qr_path = os.path.join(BASE_DIR, "server_qr.png")
+    img.save(qr_path)
+
+    print(f"QR code saved to: {qr_path}")
+
+    # Keep the terminal output readable.
+    print(f"Scan QR code or open: {url}")
+
+    return qr_path
 
 
 def main():
@@ -88,16 +95,18 @@ def main():
     print(f"    - type {url} into the browser, or")
     print("    - scan this QR code:")
     print()
-    show_qr(url, qr_path)
+    qr_path = show_qr(url)
     print()
     print("  Keep this window open while billing.")
     print("  Press Ctrl+C here to stop the server.")
     print("=" * 62)
 
     import logging
+
     logging.getLogger("server").info(f"Server ready at {url}")
 
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_config=None)
 
 

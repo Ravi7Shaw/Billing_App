@@ -1,3 +1,5 @@
+from datetime import datetime
+
 """
 main.py
 --------
@@ -76,7 +78,9 @@ async def log_requests(request: Request, call_next):
         log.exception(f"{request.method} {request.url.path} -> unhandled error")
         raise
     duration_ms = (time.time() - start) * 1000
-    log.info(f"{request.method} {request.url.path} -> {response.status_code} ({duration_ms:.0f}ms)")
+    log.info(
+        f"{request.method} {request.url.path} -> {response.status_code} ({duration_ms:.0f}ms)"
+    )
     return response
 
 
@@ -144,6 +148,7 @@ class BillIn(BaseModel):
     discount_amount: float = 0
     total: float
     payment_mode: str = "Cash"
+    bill_date: Optional[str] = None
 
 
 class DeleteAuth(BaseModel):
@@ -222,8 +227,12 @@ def delete_subtype(sub_id: int):
 # Items
 # ==================================================================
 @app.get("/api/items")
-def get_items(category_id: Optional[int] = None, subtype_id: Optional[int] = None,
-              search: Optional[str] = None, active_only: bool = True):
+def get_items(
+    category_id: Optional[int] = None,
+    subtype_id: Optional[int] = None,
+    search: Optional[str] = None,
+    active_only: bool = True,
+):
     return rows(db.get_items(category_id, subtype_id, active_only, search))
 
 
@@ -248,8 +257,14 @@ def get_item(item_id: int):
 @app.post("/api/items", status_code=201)
 def add_item(body: ItemIn):
     item_id = db.add_item(
-        body.name, body.category_id, body.subtype_id, body.barcode,
-        body.size, body.color, body.rate, body.stock_qty,
+        body.name,
+        body.category_id,
+        body.subtype_id,
+        body.barcode,
+        body.size,
+        body.color,
+        body.rate,
+        body.stock_qty,
     )
     return {"ok": True, "id": item_id}
 
@@ -257,8 +272,16 @@ def add_item(body: ItemIn):
 @app.put("/api/items/{item_id}")
 def update_item(item_id: int, body: ItemIn):
     db.update_item(
-        item_id, body.name, body.category_id, body.subtype_id, body.barcode,
-        body.size, body.color, body.rate, body.stock_qty, body.active,
+        item_id,
+        body.name,
+        body.category_id,
+        body.subtype_id,
+        body.barcode,
+        body.size,
+        body.color,
+        body.rate,
+        body.stock_qty,
+        body.active,
     )
     return {"ok": True}
 
@@ -296,13 +319,17 @@ def get_customer(cid: int):
 
 @app.post("/api/customers", status_code=201)
 def add_customer(body: CustomerIn):
-    cid = db.add_customer(body.name, body.phone or "", body.address or "", body.notes or "")
+    cid = db.add_customer(
+        body.name, body.phone or "", body.address or "", body.notes or ""
+    )
     return {"ok": True, "id": cid}
 
 
 @app.put("/api/customers/{cid}")
 def update_customer(cid: int, body: CustomerIn):
-    db.update_customer(cid, body.name, body.phone or "", body.address or "", body.notes or "")
+    db.update_customer(
+        cid, body.name, body.phone or "", body.address or "", body.notes or ""
+    )
     return {"ok": True}
 
 
@@ -353,7 +380,11 @@ def all_open_wishlist():
 # Bills
 # ==================================================================
 @app.get("/api/bills")
-def search_bills(date_from: Optional[str] = None, date_to: Optional[str] = None, search: Optional[str] = None):
+def search_bills(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    search: Optional[str] = None,
+):
     return rows(db.search_bills(date_from, date_to, search))
 
 
@@ -365,13 +396,42 @@ def next_bill_no():
 @app.post("/api/bills", status_code=201)
 def save_bill(body: BillIn):
     if not body.items:
-        raise HTTPException(status_code=400, detail="Bill has no items")
+        raise HTTPException(
+            status_code=400,
+            detail="Bill has no items",
+        )
+
+    bill_date = body.bill_date or datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        datetime.strptime(
+            bill_date,
+            "%Y-%m-%d",
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid bill date. Expected YYYY-MM-DD.",
+        )
+
     items = [it.dict() for it in body.items]
+
     bill_id, bill_no = db.save_bill(
-        body.customer_id, items, body.subtotal, body.discount_percent,
-        body.discount_amount, body.total, body.payment_mode,
+        body.customer_id,
+        items,
+        body.subtotal,
+        body.discount_percent,
+        body.discount_amount,
+        body.total,
+        body.payment_mode,
+        bill_date,
     )
-    return {"ok": True, "bill_id": bill_id, "bill_no": bill_no}
+
+    return {
+        "ok": True,
+        "bill_id": bill_id,
+        "bill_no": bill_no,
+    }
 
 
 @app.get("/api/bills/{bill_id}")
@@ -408,8 +468,12 @@ def stat_monthly():
 
 
 @app.get("/api/stats/top-items")
-def stat_top_items(date_from: Optional[str] = None, date_to: Optional[str] = None,
-                    limit: int = 10, by: str = "quantity"):
+def stat_top_items(
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: int = 10,
+    by: str = "quantity",
+):
     return rows(db.stat_top_items(date_from, date_to, limit, by))
 
 
@@ -419,7 +483,9 @@ def stat_category(date_from: Optional[str] = None, date_to: Optional[str] = None
 
 
 @app.get("/api/stats/top-customers")
-def stat_top_customers(date_from: Optional[str] = None, date_to: Optional[str] = None, limit: int = 10):
+def stat_top_customers(
+    date_from: Optional[str] = None, date_to: Optional[str] = None, limit: int = 10
+):
     return rows(db.stat_top_customers(date_from, date_to, limit))
 
 
@@ -436,5 +502,8 @@ app.mount("/", StaticFiles(directory=FRONTEND_DIR), name="frontend")
 
 if __name__ == "__main__":
     import uvicorn
-    log.info("Starting in dev mode via `python main.py` -- for normal use, run run_server.py instead.")
+
+    log.info(
+        "Starting in dev mode via `python main.py` -- for normal use, run run_server.py instead."
+    )
     uvicorn.run(app, host="0.0.0.0", port=5000)
