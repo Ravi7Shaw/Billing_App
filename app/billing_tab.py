@@ -47,6 +47,8 @@ class BillingTab(QWidget):
         self.discount_visible = (
             False  # discount column/total stays hidden until toggled open
         )
+        self._payment_user_edited = False
+        self._last_total = 0.0
 
         self._build_ui()
         self._refresh_categories()
@@ -249,9 +251,6 @@ class BillingTab(QWidget):
         self.subtotal_label = QLabel("Subtotal (before discount): Rs. 0.00")
         v.addWidget(self.subtotal_label)
 
-        # Hidden by default alongside the Discount column in the cart table,
-        # so customers don't see a running discount figure unless the
-        # cashier deliberately opens it.
         self.discount_total_row = QWidget()
         dt_row = QHBoxLayout(self.discount_total_row)
         dt_row.setContentsMargins(0, 0, 0, 0)
@@ -262,6 +261,12 @@ class BillingTab(QWidget):
         self.discount_total_row.setVisible(False)
         v.addWidget(self.discount_total_row)
 
+        self.taxable_label = QLabel("Taxable amount: Rs. 0.00")
+        v.addWidget(self.taxable_label)
+
+        self.gst_label = QLabel("GST (5%): Rs. 0.00")
+        v.addWidget(self.gst_label)
+
         v.addWidget(divider())
 
         row_total = QHBoxLayout()
@@ -271,43 +276,45 @@ class BillingTab(QWidget):
         row_total.addWidget(self.total_label)
         v.addLayout(row_total)
 
+        payment_form = QFormLayout()
+        payment_form.setSpacing(8)
+
+        self.payment_amount_input = QDoubleSpinBox()
+        self.payment_amount_input.setRange(0, 99999999.99)
+        self.payment_amount_input.setDecimals(2)
+        self.payment_amount_input.setPrefix("Rs. ")
+        self.payment_amount_input.setValue(0.0)
+        self.payment_amount_input.valueChanged.connect(self._on_payment_amount_changed)
+        payment_form.addRow("Paid now:", self.payment_amount_input)
+
+        self.balance_label = QLabel("Balance: Rs. 0.00")
+        self.balance_label.setStyleSheet("font-weight: 600;")
+        payment_form.addRow("Outstanding:", self.balance_label)
+        v.addLayout(payment_form)
+
         row3 = QHBoxLayout()
-        row3.addWidget(QLabel("Payment:"))
+        row3.addWidget(QLabel("Payment mode:"))
         self.payment_mode_combo = QComboBox()
-
-        # Bill date
-        date_row = QHBoxLayout()
-
-        date_row.addWidget(QLabel("Bill date:"))
-
-        self.bill_date_input = QDateEdit()
-        self.bill_date_input.setCalendarPopup(True)
-        self.bill_date_input.setDate(QDate.currentDate())
-
-        # Historical bills are allowed, but future bills are not.
-        self.bill_date_input.setMaximumDate(QDate.currentDate())
-
-        self.bill_date_input.setDisplayFormat("dd/MM/yyyy")
-
-        date_row.addWidget(self.bill_date_input)
-
-        # Quick button for the cashier to return to today's date.
-        today_btn = QPushButton("Today")
-        today_btn.setProperty("role", "secondary")
-        today_btn.setToolTip("Set bill date to today")
-        today_btn.clicked.connect(
-            lambda: self.bill_date_input.setDate(QDate.currentDate())
-        )
-
-        date_row.addWidget(today_btn)
-        date_row.addStretch()
-
-        v.addLayout(date_row)
-
         self.payment_mode_combo.addItems(["Cash", "Card", "UPI", "Other"])
         row3.addWidget(self.payment_mode_combo)
         row3.addStretch()
         v.addLayout(row3)
+
+        date_row = QHBoxLayout()
+        date_row.addWidget(QLabel("Bill date:"))
+        self.bill_date_input = QDateEdit()
+        self.bill_date_input.setCalendarPopup(True)
+        self.bill_date_input.setDate(QDate.currentDate())
+        self.bill_date_input.setMaximumDate(QDate.currentDate())
+        self.bill_date_input.setDisplayFormat("dd/MM/yyyy")
+        date_row.addWidget(self.bill_date_input)
+        today_btn = QPushButton("Today")
+        today_btn.setProperty("role", "secondary")
+        today_btn.setToolTip("Set bill date to today")
+        today_btn.clicked.connect(lambda: self.bill_date_input.setDate(QDate.currentDate()))
+        date_row.addWidget(today_btn)
+        date_row.addStretch()
+        v.addLayout(date_row)
 
         btn_row = QHBoxLayout()
         clear_btn = QPushButton("Clear Bill")
@@ -315,7 +322,7 @@ class BillingTab(QWidget):
         clear_btn.clicked.connect(self._clear_bill)
         btn_row.addWidget(clear_btn)
         btn_row.addStretch()
-        complete_btn = QPushButton("Complete Bill  \u2713")
+        complete_btn = QPushButton("Complete Bill  ✓")
         complete_btn.setMinimumWidth(180)
         complete_btn.clicked.connect(self._complete_bill)
         btn_row.addWidget(complete_btn)
@@ -396,6 +403,7 @@ class BillingTab(QWidget):
                 category=item["category_name"],
                 qty=1,
                 rate=item["rate"],
+                gst_rate=item["gst_rate"] if "gst_rate" in item.keys() else 5.0,
             )
             self.barcode_status.setVisible(False)
         else:
@@ -511,7 +519,12 @@ class BillingTab(QWidget):
             )
 
         self._add_to_cart(
-            item_id=item_id, name=name, category=cat_name, qty=qty, rate=rate
+            item_id=item_id,
+            name=name,
+            category=cat_name,
+            qty=qty,
+            rate=rate,
+            gst_rate=(existing["gst_rate"] if existing and "gst_rate" in existing.keys() else 5.0),
         )
 
         # Reset just the item-specific fields; keep category/brand selected
@@ -526,7 +539,7 @@ class BillingTab(QWidget):
         self.barcode_input.setFocus()
 
     # ------------------------------------------------------------ the cart
-    def _add_to_cart(self, item_id, name, category, qty, rate):
+    def _add_to_cart(self, item_id, name, category, qty, rate, gst_rate=5.0):
         for row in self.cart:
             if row["item_id"] == item_id and row["item_id"] is not None:
                 row["qty"] += qty
@@ -544,6 +557,7 @@ class BillingTab(QWidget):
                 "rate": rate,
                 "amount": qty * rate,
                 "discount": 0.0,
+                "gst_rate": float(gst_rate or 0.0),
             }
         )
         self._render_cart()
@@ -647,24 +661,60 @@ class BillingTab(QWidget):
         self.discount_total_row.setVisible(self.discount_visible)
 
     def _subtotal(self):
-        """Gross total before any discount."""
+        """Gross total before any discount and before GST."""
         return sum(r["amount"] for r in self.cart)
 
     def _total_discount(self):
         return sum(r["discount"] for r in self.cart)
 
+    def _taxable_amount(self):
+        return max(self._subtotal() - self._total_discount(), 0.0)
+
+    def _gst_amount(self):
+        total = 0.0
+        for row in self.cart:
+            net_line = max(row["amount"] - row["discount"], 0.0)
+            total += net_line * float(row.get("gst_rate", 5.0)) / 100.0
+        return total
+
     def _grand_total(self):
-        return max(self._subtotal() - self._total_discount(), 0)
+        return self._taxable_amount() + self._gst_amount()
+
+    def _on_payment_amount_changed(self, value):
+        self._payment_user_edited = True
+        balance = max(self._grand_total() - value, 0.0)
+        self.balance_label.setText(f"Balance: {rupees(balance)}")
 
     def _recalculate_totals(self):
         subtotal = self._subtotal()
         discount_total = self._total_discount()
+        taxable = self._taxable_amount()
+        gst = self._gst_amount()
         total = self._grand_total()
+
         self.subtotal_label.setText(f"Subtotal (before discount): {rupees(subtotal)}")
         self.discount_total_label.setText(
             f"Total discount given: -{rupees(discount_total)}"
         )
+        self.taxable_label.setText(f"Taxable amount: {rupees(taxable)}")
+
+        # All current clothing items use 5% GST. Keep the display simple.
+        self.gst_label.setText(f"GST (5%): {rupees(gst)}")
         self.total_label.setText(f"Total to Pay: {rupees(total)}")
+
+        old_total = self._last_total
+        current_paid = self.payment_amount_input.value()
+        if not self._payment_user_edited or abs(current_paid - old_total) < 0.01:
+            new_paid = total
+        else:
+            new_paid = min(current_paid, total)
+
+        self.payment_amount_input.blockSignals(True)
+        self.payment_amount_input.setMaximum(total)
+        self.payment_amount_input.setValue(new_paid)
+        self.payment_amount_input.blockSignals(False)
+        self.balance_label.setText(f"Balance: {rupees(max(total - new_paid, 0.0))}")
+        self._last_total = total
 
     # ---------------------------------------------------------- completion
     def _complete_bill(self):
@@ -699,40 +749,68 @@ class BillingTab(QWidget):
 
         subtotal = self._subtotal()
         discount_amount = self._total_discount()
+        taxable_amount = self._taxable_amount()
+        gst_amount = self._gst_amount()
         total = self._grand_total()
         percent = (discount_amount / subtotal * 100.0) if subtotal else 0.0
         payment_mode = self.payment_mode_combo.currentText()
         bill_date = self.bill_date_input.date().toString("yyyy-MM-dd")
+        paid_now = self.payment_amount_input.value()
 
-        bill_items = [
-            {
-                "item_id": row["item_id"],
-                "name": row["name"],
-                "category": row["category"],
-                "quantity": row["qty"],
-                "rate": row["rate"],
-                "subtotal": row["amount"]
-                - row["discount"],  # net amount charged for this line
-            }
-            for row in self.cart
-        ]
+        if paid_now > total + 0.01:
+            QMessageBox.warning(self, "Invalid payment", "Amount paid cannot exceed the bill total.")
+            return
 
-        bill_id, bill_no = self.db.save_bill(
-            customer_id,
-            bill_items,
-            subtotal,
-            percent,
-            discount_amount,
-            total,
-            payment_mode,
-            bill_date,
-        )
+        # The current catalog uses 5% GST. Each line stores its own GST snapshot.
+        bill_items = []
+        for row in self.cart:
+            net_line = max(row["amount"] - row["discount"], 0.0)
+            line_gst_rate = float(row.get("gst_rate", 5.0))
+            line_gst_amount = net_line * line_gst_rate / 100.0
+            bill_items.append(
+                {
+                    "item_id": row["item_id"],
+                    "name": row["name"],
+                    "category": row["category"],
+                    "quantity": row["qty"],
+                    "rate": row["rate"],
+                    "subtotal": net_line,
+                    "gst_rate": line_gst_rate,
+                    "gst_amount": line_gst_amount,
+                }
+            )
+
+        # If every line has the same GST rate, save that rate as the bill rate.
+        # For the current shop configuration this is 5%.
+        rates = {round(float(row.get("gst_rate", 5.0)), 4) for row in self.cart}
+        bill_gst_rate = next(iter(rates)) if len(rates) == 1 else 0.0
+
+        try:
+            bill_id, bill_no = self.db.save_bill(
+                customer_id,
+                bill_items,
+                subtotal,
+                percent,
+                discount_amount,
+                total,
+                payment_mode,
+                bill_date,
+                taxable_amount,
+                bill_gst_rate,
+                gst_amount,
+                paid_now,
+                "Initial payment",
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Could not save bill", str(exc))
+            return
 
         if wishlist_note and customer_id:
             self.db.add_wishlist(customer_id, wishlist_note)
 
-        bill_row, bill_items = self.db.get_bill(bill_id)
-        dialog = ReceiptDialog(bill_row, bill_items, self)
+        # Receipt intentionally remains unchanged for now, as requested.
+        bill_row, saved_bill_items = self.db.get_bill(bill_id)
+        dialog = ReceiptDialog(bill_row, saved_bill_items, self)
         dialog.exec()
 
         if self.on_bill_saved:
@@ -744,6 +822,8 @@ class BillingTab(QWidget):
 
     def _clear_bill(self):
         self.cart = []
+        self._payment_user_edited = False
+        self._last_total = 0.0
         self._render_cart()
         self._recalculate_totals()
         self.barcode_input.setFocus()

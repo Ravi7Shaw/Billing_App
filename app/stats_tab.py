@@ -7,7 +7,6 @@ next" requests across all customers).
 """
 
 import statistics
-from datetime import date
 
 import matplotlib
 matplotlib.use("QtAgg")
@@ -89,17 +88,6 @@ class StatsTab(QWidget):
         category_v.addWidget(self.category_canvas)
         charts_row.addWidget(category_box, 1)
 
-        # ---------------- monthly sales (always full history, independent
-        # of the Period filter above -- a month-by-month view is naturally
-        # a longer-range picture than "last 7/30 days") ----------------
-        monthly_box = QGroupBox("Monthly Sales")
-        monthly_v = QVBoxLayout(monthly_box)
-        self.monthly_figure = Figure(figsize=(10, 3.2), constrained_layout=True)
-        self.monthly_canvas = FigureCanvas(self.monthly_figure)
-        self.monthly_canvas.setMinimumHeight(260)
-        monthly_v.addWidget(self.monthly_canvas)
-        outer.addWidget(monthly_box)
-
         # ---------------- top items ----------------
         top_items_box = QGroupBox("Best Selling Items")
         top_items_v = QVBoxLayout(top_items_box)
@@ -165,7 +153,6 @@ class StatsTab(QWidget):
         self._refresh_kpis(date_from, date_to)
         self._refresh_trend_chart(date_from, date_to)
         self._refresh_category_chart(date_from, date_to)
-        self._refresh_monthly_chart()
         self._refresh_top_items(date_from, date_to)
         self._refresh_top_customers(date_from, date_to)
         self._refresh_wishlist()
@@ -185,14 +172,49 @@ class StatsTab(QWidget):
         std_daily = statistics.pstdev(revenues) if len(revenues) > 1 else 0
 
         cards = [
-            make_stat_card("Total Revenue", rupees(totals["revenue"]), f"{totals['bill_count']} bill(s)"),
+            make_stat_card(
+                "Total Revenue",
+                rupees(totals["revenue"]),
+                f"{totals['bill_count']} bill(s)",
+            ),
+            make_stat_card(
+                "Total Expenses",
+                rupees(totals["expenses"]),
+                "business costs in period",
+            ),
+            make_stat_card(
+                "Net Profit",
+                rupees(totals["net_profit"]),
+                "Revenue − Expenses",
+            ),
+            make_stat_card(
+                "Payments Collected",
+                rupees(totals["payments_collected"]),
+                "cash/credit payments received",
+            ),
+            make_stat_card(
+                "Outstanding Credit",
+                rupees(totals["outstanding"]),
+                "unpaid balance",
+            ),
             make_stat_card("Pieces Sold", str(totals["pieces"]), ""),
             make_stat_card("Avg Bill Value", rupees(totals["avg_bill"]), ""),
-            make_stat_card("Mean Daily Sales", rupees(mean_daily), f"over {len(revenues)} active day(s)"),
-            make_stat_card("Std. Dev. (daily)", rupees(std_daily), "day-to-day variation"),
+            make_stat_card(
+                "Mean Daily Sales",
+                rupees(mean_daily),
+                f"over {len(revenues)} active day(s)",
+            ),
+            make_stat_card(
+                "Std. Dev. (daily)",
+                rupees(std_daily),
+                "day-to-day variation",
+            ),
         ]
-        for col, card in enumerate(cards):
-            self.kpi_grid.addWidget(card, 0, col)
+
+        # Keep the financial KPIs together at the top, then operational KPIs.
+        columns = 5
+        for index, card in enumerate(cards):
+            self.kpi_grid.addWidget(card, index // columns, index % columns)
 
     def _refresh_trend_chart(self, date_from, date_to):
         daily = self.db.stat_daily_sales(date_from, date_to)
@@ -248,79 +270,6 @@ class StatsTab(QWidget):
             ax.set_xticks([])
             ax.set_yticks([])
         self.category_canvas.draw()
-
-    @staticmethod
-    def _month_add(year_month, delta):
-        """'2026-01' + 1 -> '2026-02'. Works across year boundaries."""
-        y, m = int(year_month[:4]), int(year_month[5:7])
-        idx = y * 12 + (m - 1) + delta
-        return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
-
-    @staticmethod
-    def _month_label(year_month):
-        y, m = int(year_month[:4]), int(year_month[5:7])
-        return date(y, m, 1).strftime("%b %Y")
-
-    def _refresh_monthly_chart(self):
-        """Shows a trailing month-by-month view anchored to the current
-        month, always at least MIN_MONTHS wide even if the shop has far
-        less sales history than that -- otherwise a new shop with only a
-        day or two of sales gets a single bar stretched across the whole
-        chart, which doesn't read as a trend graph at all. Extends further
-        back automatically to fit all real sales history, capped at
-        MAX_MONTHS so the chart doesn't grow unbounded over the years."""
-        MIN_MONTHS = 6
-        MAX_MONTHS = 12
-
-        rows = self.db.stat_monthly_sales()
-        data = {r["month"]: r["revenue"] for r in rows} if rows else {}
-
-        self.monthly_figure.clear()
-        ax = self.monthly_figure.add_subplot(111)
-
-        today_month = date.today().strftime("%Y-%m")
-        earliest_with_sales = min(data.keys()) if data else today_month
-
-        start = min(self._month_add(today_month, -(MIN_MONTHS - 1)), earliest_with_sales)
-        earliest_allowed = self._month_add(today_month, -(MAX_MONTHS - 1))
-        if start < earliest_allowed:
-            start = earliest_allowed
-
-        full_range = []
-        cur = start
-        while cur <= today_month:
-            full_range.append(cur)
-            cur = self._month_add(cur, 1)
-
-        revenues = [data.get(m, 0) for m in full_range]
-        labels = [self._month_label(m) for m in full_range]
-        max_rev = max(revenues) if revenues else 0
-
-        bars = ax.bar(labels, revenues, color=COLORS["primary"], width=0.55, zorder=3)
-        ax.set_ylabel("Revenue (Rs.)")
-        ax.set_xlim(-0.7, len(full_range) - 0.3)
-        ax.set_ylim(0, max_rev * 1.25 if max_rev > 0 else 100)
-        ax.tick_params(axis="x", rotation=35, labelsize=8)
-        ax.tick_params(axis="y", labelsize=8)
-        ax.grid(axis="y", color=COLORS["border"], linewidth=0.7, zorder=0)
-        ax.set_axisbelow(True)
-        for spine in ("top", "right"):
-            ax.spines[spine].set_visible(False)
-
-        for bar, rev in zip(bars, revenues):
-            if rev > 0:
-                ax.text(
-                    bar.get_x() + bar.get_width() / 2, bar.get_height() + max(max_rev * 0.03, 3),
-                    rupees(rev), ha="center", va="bottom", fontsize=7, color=COLORS["text"],
-                )
-
-        if not data:
-            ax.text(
-                0.5, 0.5, "No sales recorded yet", ha="center", va="center",
-                color=COLORS["muted"], transform=ax.transAxes,
-            )
-
-        self.monthly_canvas.draw()
 
     def _refresh_top_items(self, date_from, date_to):
         by = "quantity" if self.top_items_sort_combo.currentText() == "Quantity sold" else "revenue"

@@ -489,6 +489,38 @@ def stat_top_customers(
     return rows(db.stat_top_customers(date_from, date_to, limit))
 
 
+# Add these imports near the top of clothshop_billing_server/backend/main.py:
+from io import BytesIO
+from fastapi.responses import FileResponse, StreamingResponse
+import qrcode
+
+
+# Add this endpoint after /api/health:
+@app.get("/api/payment-qr")
+def payment_qr(amount: float = 0, bill_no: str = ""):
+    amount = max(0.0, float(amount or 0))
+    vpa = "9008080213@ybl"
+    upi_url = (
+        "upi://pay?"
+        f"pa={vpa}&"
+        "pn=BELLI%20APPERAL&"
+        f"am={amount:.2f}&"
+        "cu=INR&"
+        f"tn=Bill%20{bill_no}"
+    )
+
+    img = qrcode.make(upi_url)
+    buffer = BytesIO()
+    img.save(buffer, format="PNG")
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type="image/png",
+        headers={"Cache-Control": "no-store"},
+    )
+
+
 # ==================================================================
 # Frontend (served last so it doesn't shadow /api/* routes above)
 # ==================================================================
