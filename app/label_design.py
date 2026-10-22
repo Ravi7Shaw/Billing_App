@@ -9,14 +9,14 @@ import json
 import math
 from string import Formatter
 
-from barcode import Code128
+from barcode import Code128, EAN13
 import qrcode
 from PySide6.QtCore import Qt, QRectF, QSizeF, QMarginsF, QPointF
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage, QPainter, QPageLayout, QPageSize, QPen, QTransform, QPolygonF
 from PySide6.QtPrintSupport import QPrinter
 
 PX_PER_MM = 96 / 25.4
-KINDS = ('text', 'barcode', 'qr', 'rectangle', 'ellipse', 'triangle', 'line', 'image')
+KINDS = ('text', 'barcode', 'ean13', 'qr', 'rectangle', 'ellipse', 'triangle', 'line', 'image')
 
 
 def default_design():
@@ -82,6 +82,12 @@ def barcode_pattern(text):
 
 
 @lru_cache(maxsize=128)
+def ean13_pattern(text):
+    from citizen_zpl import ean13
+    return EAN13(ean13(text)).build()[0]
+
+
+@lru_cache(maxsize=128)
 def qr_matrix(text):
     if not text or len(text.encode('utf-8')) > 2000:
         raise ValueError('QR data must contain 1–2000 UTF-8 bytes.')
@@ -143,19 +149,19 @@ def validate_design(design, metadata=None, dpi=203, offsets=(0, 0)):
             bounds=QFontMetricsF(font).boundingRect(rect,Qt.TextWordWrap|Qt.AlignLeft,text)
             if bounds.width()>rect.width()+1 or bounds.height()>rect.height()+1:
                 raise ValueError('Text is clipped: enlarge its box, shorten the text or reduce its font size.')
-        if e['kind'] in ('barcode', 'qr'):
+        if e['kind'] in ('barcode', 'ean13', 'qr'):
             if e.get('rotation',0)%90:
                 raise ValueError('Rotate barcodes in 90° steps to preserve scanner accuracy.')
-            modules = len(barcode_pattern(text))+20 if e['kind'] == 'barcode' else len(qr_matrix(text))
-            dots = (e['w'] if e['kind'] == 'barcode' else min(e['w'], e['h'])) * dpi / 25.4
+            modules = len(qr_matrix(text)) if e['kind']=='qr' else len(ean13_pattern(text) if e['kind']=='ean13' else barcode_pattern(text))+20
+            dots = (e['w'] if e['kind'] in ('barcode','ean13') else min(e['w'], e['h'])) * dpi / 25.4
             if int(dots / modules) < 2:
                 raise ValueError('Barcode data is too long for this box at the selected DPI. Enlarge it, shorten the data, or use QR.')
-            if e['kind'] == 'barcode' and e['h'] < 8:
+            if e['kind'] in ('barcode','ean13') and e['h'] < 8:
                 raise ValueError('Code 128 bars must be at least 8 mm tall.')
             payloads.append(text)
     # Later opaque elements must not obscure scanner symbols or their quiet zones.
     for index,e in enumerate(elements):
-        if e['kind'] in ('barcode','qr'):
+        if e['kind'] in ('barcode','ean13','qr'):
             box=element_bounds(e)
             for above in elements[index+1:]:
                 if box.intersects(element_bounds(above)):
@@ -180,13 +186,13 @@ def draw_element(painter, e, metadata, scale):
         painter.setPen(QColor(e.get('color', '#000000')))
         alignment = {'left': Qt.AlignLeft, 'center': Qt.AlignHCenter, 'right': Qt.AlignRight}.get(e.get('align'), Qt.AlignLeft)
         painter.drawText(rect, alignment | Qt.AlignVCenter | Qt.TextWordWrap, text)
-    elif kind in ('barcode', 'qr'):
+    elif kind in ('barcode', 'ean13', 'qr'):
         painter.setRenderHint(QPainter.Antialiasing, False)
         painter.fillRect(rect, Qt.white)
         painter.setPen(Qt.NoPen)
         painter.setBrush(Qt.black)
-        if kind == 'barcode':
-            pattern = barcode_pattern(text)
+        if kind in ('barcode','ean13'):
+            pattern = ean13_pattern(text) if kind=='ean13' else barcode_pattern(text)
             unit = max(1, int(rect.width()/(len(pattern)+20)))
             left = int((rect.width()-len(pattern)*unit)/2)
             for index, bit in enumerate(pattern):

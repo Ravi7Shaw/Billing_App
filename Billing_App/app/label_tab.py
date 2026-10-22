@@ -99,8 +99,9 @@ class PaperView(QGraphicsView):
 
 
 class LabelPrinterDialog(QDialog):
-    def __init__(self,parent):
+    def __init__(self,parent,raw=False):
         super().__init__(parent)
+        self.raw=raw
         self.setWindowTitle('Select label printer')
         layout=QVBoxLayout(self)
         self.transport=printing_backend()
@@ -108,13 +109,21 @@ class LabelPrinterDialog(QDialog):
         self.printer=combo();layout.addWidget(self.printer)
         actions=QHBoxLayout();layout.addLayout(actions)
         button('Refresh printers',self.refresh_printers,actions)
-        button('Setup / help',lambda:QMessageBox.information(self,'Printer setup',printer_setup_help()),actions)
+        button('Setup / help',lambda:QMessageBox.information(self,'Printer setup',self.setup_help()),actions)
         button('Queue status',self.show_queue_status,actions)
         self.buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
         self.buttons.button(QDialogButtonBox.Ok).setText('Continue')
         self.buttons.accepted.connect(self.accept);self.buttons.rejected.connect(self.reject);layout.addWidget(self.buttons)
         self.refresh_printers()
         fit_window(self,480,280)
+
+    def setup_help(self):
+        if self.raw:
+            return ('Citizen labels are sent as RAW ZPL. Keep the printer in ZPL/Zebra emulation. '
+                    'Linux uses lp -d <queue> -o raw; a PDF/raster driver is not needed for these labels. '
+                    'Windows uses its RAW spooler and needs an installed queue on the correct printer port. '
+                    'Use Install / setup in Barcode Labels to install missing CUPS tools or open Windows Add Printer, then refresh printers.')
+        return printer_setup_help()
 
     def show_queue_status(self):
         try:message=queue_status(self.printer.currentText())
@@ -124,11 +133,12 @@ class LabelPrinterDialog(QDialog):
     def refresh_printers(self):
         previous=self.printer.currentText();self.transport=printing_backend()
         try:
-            names=available_printers();message='Choose the installed label printer. Paper size is taken from this design; scaling is 100%.'
+            names=available_printers();message=('Citizen fixed 4 × 2 inch / 203 DPI. Sends RAW ZPL; keep the printer in ZPL/Zebra emulation.' if self.raw else 'Choose the installed label printer. Paper size is taken from this design; scaling is 100%.')
         except ValueError as exc:
             names=[];message=str(exc)
         self.printer.clear();self.printer.addItems(names)
         index=self.printer.findText(previous)
+        if index<0 and self.raw:index=self.printer.findText('Citizen_CL_S621II')
         if index<0:index=next((i for i,n in enumerate(names) if 'citizen' in n.lower()),0)
         self.printer.setCurrentIndex(index)
         self.buttons.button(QDialogButtonBox.Ok).setEnabled(bool(names))

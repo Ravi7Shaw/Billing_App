@@ -29,17 +29,12 @@ with tempfile.TemporaryDirectory() as folder:
     for width,height in ((640,480),(800,600),(1366,768),(1920,1080)):
         for page in range(tab.pages.count()):
             tab.pages.setCurrentIndex(page)
-            for subpage in range(tab.editor_tabs.count()) if page==1 else [0]:
-                if page==1:tab.editor_tabs.setCurrentIndex(subpage)
-                window.resize(width,height);QTest.qWait(30)
-                assert window.width()<=width and window.height()<=height,(width,height,page,subpage,window.size())
-                for action in (tab.print_button,tab.pdf_button,window.section_picker,window.logout_button):
-                    rect=QRect(action.mapTo(window,QPoint()),action.size())
-                    assert window.rect().contains(rect) and action.isVisibleTo(window),(width,height,page,rect)
-    # Resize paper persists both dimensions and a movable/resizable element.
-    tab.width.setValue(75);tab.height.setValue(35);tab.resize_paper()
-    assert (tab.document['width'],tab.document['height'])==(75,35)
-    tab.undo();assert tab.document['width']==100
+            window.resize(width,height);QTest.qWait(30)
+            assert window.width()<=width and window.height()<=height,(width,height,page,window.size())
+            for action in (tab.print_button,tab.export_button,tab.setup_button,window.section_picker,window.logout_button):
+                rect=QRect(action.mapTo(window,QPoint()),action.size())
+                assert window.rect().contains(rect) and action.isVisibleTo(window),(width,height,page,rect)
+    assert tab.pages.count()==2 and not hasattr(tab,'scene')
     window._logout_admin();assert window.labels_tab is None and window.tabs.count()==1
     window.close();assert not errors,errors
-print('Label editor sections, print controls and navigation fit all tested sizes.')
+print('Fixed Citizen label form, print/setup controls and navigation fit all tested sizes.')

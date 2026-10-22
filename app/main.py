@@ -30,7 +30,7 @@ from access import AccessSession, RoleDatabase
 from theme import STYLESHEET
 from billing_tab import BillingTab
 from commerce_ui import PurchasesTab, ChartAccountsTab
-from label_tab import LabelTab
+from citizen_tab import CitizenLabelTab as LabelTab
 from inventory_tab import InventoryTab
 from customers_tab import CustomersTab
 from sales_tab import SalesTab

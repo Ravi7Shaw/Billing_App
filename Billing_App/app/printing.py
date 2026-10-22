@@ -44,11 +44,15 @@ def printer_setup_hint():
     return 'No printer available. Install the Windows printer driver, then refresh. See Setup / help.'
 
 
-def _cups(command, timeout=10):
+def _cups(command, timeout=10, input_bytes=None):
     env=os.environ.copy();env.update(LC_ALL='C',LANG='C')
     try:
-        result=subprocess.run(command,capture_output=True,text=True,encoding='utf-8',errors='replace',
-                              env=env,timeout=timeout,check=False)
+        if input_bytes is None:
+            result=subprocess.run(command,capture_output=True,text=True,encoding='utf-8',errors='replace',
+                                  env=env,timeout=timeout,check=False)
+        else:
+            result=subprocess.run(command,input=input_bytes,capture_output=True,env=env,timeout=timeout,check=False)
+            result.stdout=result.stdout.decode('utf-8','replace');result.stderr=result.stderr.decode('utf-8','replace')
     except subprocess.TimeoutExpired as exc:
         raise PrintError('CUPS did not respond. Check the printer queue before retrying; the job may already be submitted.') from exc
     except OSError as exc:
@@ -89,7 +93,7 @@ def queue_status(queue):
     queue=_queue_name(queue)
     state=_cups(['lpstat','-l','-p',queue])
     jobs=_cups(['lpstat','-W','not-completed','-l','-o',queue])
-    return state+'\nPending jobs:\n'+(jobs.strip() or 'None')+'\nIf no paper comes out, print a system test page and check the CUPS filter/driver log. A raw queue cannot convert PDF to Citizen printer commands.'
+    return state+'\nPending jobs:\n'+(jobs.strip() or 'None')+'\nIf no paper comes out, print a system test page and check the CUPS filter/driver log. Fixed Citizen labels use raw ZPL; PDF receipts require a PDF-capable driver.'
 
 
 def submit_pdf(path,queue,width_mm,height_mm,dpi=300,copies=1,title='Cloth Shop'):
@@ -114,3 +118,19 @@ def submit_pdf(path,queue,width_mm,height_mm,dpi=300,copies=1,title='Cloth Shop'
     if not match:
         raise PrintError('CUPS did not return a job id. Check lpstat -o and the printer before retrying; the job may already exist.')
     return match.group(1)
+
+
+def submit_raw(queue,zpl):
+    """Send one ZPL document; ^PQ is the only label count (no spooler copies)."""
+    if not isinstance(zpl,bytes) or not zpl.startswith(b'^XA\n') or not zpl.rstrip().endswith(b'^XZ') or len(zpl)>100000:
+        raise PrintError('Invalid Citizen print document.')
+    if sys.platform=='win32':
+        from windows_raw import submit_windows_raw
+        return 'Windows job '+str(submit_windows_raw(queue,zpl))
+    if not sys.platform.startswith('linux') or printing_backend()!='cups':
+        raise PrintError('Raw Citizen printing needs Linux CUPS tools or a Windows printer queue. Use Install / setup.')
+    queue=_queue_name(queue);check_cups_queue(queue)
+    output=_cups(['lp','-d',queue,'-o','raw','-n','1','-o','job-sheets=none','-t','Cloth Shop Citizen Labels'],timeout=30,input_bytes=zpl)
+    match=re.search(r'request id is (\S+-\d+)',output)
+    if not match:raise PrintError('No CUPS job id returned. Check the queue before retrying; the job may already be submitted.')
+    return 'CUPS job '+match.group(1)

@@ -199,3 +199,20 @@ It uses mocked command responses and temporary synthetic PDFs/databases, sending
 no real printer jobs. PDF inspection requires `tests/requirements-labels.txt`.
 Run it for both app copies using `BILLING_APP_DIR` as described above. Physical
 printing and native Windows executable verification remain device/OS checks.
+
+
+## Fixed Citizen raw ZPL labels
+
+`test_citizen.py` covers the fixed 812×406 dot label and company name, exact `^PQ`
+quantity, EAN-13 checksum and independent decoding, field escaping, Linux `lp -o
+raw` stdin bytes, Windows RAW spooler API contract/partial writes/abort/close,
+Windows routing, setup command selection/USB detection without guessed ports,
+Windows Add Printer launch, admin rechecks, twice-confirmed cancellation, stock
+posting, scan aliases, and frozen-price reprints. Installer tests mock privileged
+commands; they never install packages on the test host. Windows API stubs do not
+replace native Windows executable and physical-printer release checks.
+
+`label_layout_probe.py` now checks the default simple Citizen form and history,
+plus Print, Export ZPL and Install / setup controls at all documented sizes.
+The older label designer modules/tests remain for legacy documents; the default
+admin screen uses `citizen_tab.py` and exposes no drawing controls.

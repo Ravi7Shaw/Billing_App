@@ -79,6 +79,14 @@ class LabelQueries:
                     raise ValueError('Choose an active category.')
                 if subtype is not None and not c.execute('SELECT 1 FROM subtypes WHERE id=? AND category_id=?',(subtype,category)).fetchone():
                     raise ValueError('Brand/style does not belong to this category.')
+                # A brand typed in the fixed form is created only in this confirmed transaction.
+                # Export/cancellation never creates a master, and item failures roll it back.
+                brand_name=new_item.get('new_subtype_name')
+                if subtype is None and brand_name:
+                    brand_name=str(brand_name).strip()
+                    if not 1<=len(brand_name)<=100:raise ValueError('Enter a brand/style up to 100 characters.')
+                    existing=c.execute('SELECT id FROM subtypes WHERE category_id=? AND name=? COLLATE NOCASE',(category,brand_name)).fetchone()
+                    subtype=existing['id'] if existing else c.execute('INSERT INTO subtypes(category_id,name) VALUES(?,?)',(category,brand_name)).lastrowid
                 rate=cents(new_item.get('rate',0))/100
                 code=str(new_item.get('barcode','')).strip()
                 if not code:

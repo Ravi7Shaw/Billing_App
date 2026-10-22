@@ -412,181 +412,123 @@ prior recorded costs and avoid inventing historical valuations.
 The older Statistics card previously called Net Profit is labelled **Sales less
 expenses**; use Chart of Accounts for the cost-based profit calculation.
 
-## Barcode Labels — Linux and Windows
+## Citizen barcode labels — Linux and Windows
 
-**Admin → Barcode Labels** provides a label designer and stock-linked print
-batches in both app copies. Install the updated requirements before running from
-source; Windows setup/update also installs the new `python-barcode` dependency.
-The Citizen CL-S621II photo is the target device. Windows uses its installed
-printer driver through Qt. Linux uses CUPS command tools (`lp` / `lpstat`) when
-available, submitting an actual-size PDF and showing the CUPS job id. This also
-works when Qt cannot discover the CUPS printer. Without the command tools, the
-app uses Qt's native printer support. Both paths need a compatible printer driver.
+**Admin → Barcode Labels** now opens a simple form using the shop's working
+Citizen ZPL layout. The label heading is **BELLI APPERAL SYNDICATE**. There is
+no drawing/canvas workflow in this screen.
 
-### Design and metadata
+- Fixed **4 × 2 inches (101.6 × 50.8 mm), 812 × 406 dots at 203 DPI**.
+- Enter **Brand, Product, Size, MRP, Selling price, EAN-13 barcode and quantity**.
+- Barcode must contain 13 ASCII digits with a valid EAN-13 check digit. Example:
+  `8905310168599`. Stock keeps the catalog category/brand/godown selections.
+  For a new item, a typed brand is matched or created in that category only after
+  both print confirmations; exporting/cancelling creates no brand or stock.
+- Select an existing catalog item or create one. For existing items, selling
+  price is read from Inventory. Change that price in Inventory before printing.
+  Print text and MRP can be entered here; the fixed text rows allow 20 characters.
+- Choose the stock godown and **Reprint — no stock change** or **Add new stock**.
+  New catalog items require Add new stock. Items already received through
+  Purchases should normally use Reprint to avoid adding their stock twice.
+- Two confirmations show the actual printer, quantity, prices, barcode, godown
+  and stock change. Cancelling either sends nothing and adds no stock.
+- One raw ZPL document carries `^PQ` for the selected label count; the spooler
+  never multiplies that quantity with additional copies.
+- **Export ZPL** saves the print data without sending it or adding stock.
 
-- Width and height are **user-entered millimetres**, initially **100 × 50 mm**.
-  Choose **Design label** for a live white-paper preview with a shadow. It fits
-  the screen without changing physical print size. The preview uses selected
-  printer-dot geometry, including X/Y correction offsets.
-- Select an existing catalog item or create a new one with category, brand/style,
-  size, colour, selling price and barcode. Categories/brands can be added from
-  this screen; they are the same masters used by Inventory and billing.
-- Add and drag text, Code 128, QR, rectangles, lines and logo images. Drag the
-  selected element's lower-right handle to resize, or enter exact X/Y/width/height
-  in millimetres under **Selected element properties**. Rotate, align, duplicate,
-  delete, reorder layers, undo or redo. **Double-click text on the paper** or
-  select a text/barcode/QR box and click **Edit / style** to type into a multiline
-  writing box, choose **font, size, bold, italic, underline, alignment and box dimensions**, then **Save**. Adding a Text box opens this editor automatically.
-  Choose **Rectangle, Ellipse, Triangle or Line** and click **Add** to insert a shape.
-  **Edit / style** or double-click opens shape properties for dimensions, rotation,
-  border/fill colours and shape type; click **Apply properties**.
-- Font selection includes every font installed on the current computer, with
-  point size, bold, italic, underline and colour controls. Install the same fonts
-  on Linux and Windows for matching typography. Thermal printers print in their
-  supported monochrome mode; decorative colour depends on the printer driver.
-- Text and barcode content bind to fields such as `{name}`, `{category}`,
-  `{brand}`, `{style}`, `{size}`, `{color}`, `{rate}`, `{godown}` and `{barcode}`.
-  Additional metadata accepts `field=value`, one field per line. Use `{{` and `}}`
-  to print literal braces. The expanded values are frozen in the saved batch.
-- `{metadata}` is a JSON **string containing all catalog and custom metadata**.
-  Use the **QR — full metadata string** starting layout to encode it directly.
-  Code 128 is available for compact ASCII strings, including a catalog SKU or
-  short custom field combination. Long data cannot be made readable by shrinking
-  bars indefinitely: enlarge the barcode or use QR. QR requires a 2D scanner;
-  both barcode types resolve to the same existing catalog item in New Bill.
-- Templates save in the shop database (included in Backup), or import/export as
-  JSON with embedded logos. Physical dimensions, elements, fonts, DPI and printer
-  correction offsets are saved. Starting layouts and imported templates replace
-  the current design; Undo restores the previous design.
+### Printing on Linux
 
-### Printer setup and accuracy
+The app follows the supplied working command:
 
-1. **Windows:** install the printer's Windows driver and add it under Printers &
-   scanners. **Linux:** configure the printer through CUPS / Print Settings with
-   a driver that supports its custom label size. The printer must appear in the
-   app's printer selector. The desktop, template and stock code is shared across
-   both OSes; the updater/build helper remains specifically for Windows `.exe`.
-2. Set the actual roll width/height and gap or black-mark media mode in the driver.
-   Match the app's DPI to the device/driver; **203 DPI** is the starting setting,
-   with 300/600 options for other compatible printers. Enter the actual label
-   width/height in the app; these are not fixed to 100 × 50 mm.
-3. Use **Calibration** to print a 20 × 20 mm reference square. Measure it. If its
-   size is wrong, fix driver scaling/media configuration; do not compensate with
-   offsets. Use X/Y offsets only to correct placement. Calibrate the printer's
-   media/gap sensor according to its manual if feeding is wrong.
-4. The application requests the entered custom paper size, zero application
-   margins, full-page drawing, one driver copy and **100% scale**. Requested
-   label count is emitted as separate pages. It rejects a driver-reported paper
-   size mismatch on the native driver path, elements outside the paper, clipped text, obscured symbols,
-   and barcodes whose narrow modules would be under two device dots. Barcode/QR
-   rotations use 90-degree steps, with quiet zones preserved.
-5. **PDF preview** saves one actual-size label and never changes stock. When
-   printing a PDF externally, select actual size / 100%, not fit-to-page.
-   PDF page dimensions are quantized to points; tests allow 0.3 mm rounding.
+```bash
+lp -d Citizen_CL_S621II -o raw < citizen-label.zpl
+```
 
-Physical alignment, media feeding and paper output still depend on the installed
-driver, calibration and hardware. Automated tests verify encoding, rendering,
-page size and the print workflow; they cannot certify a particular printer's
-physical output. A missing printer produces an actionable dialog, not a silent
-print button.
+It sends ZPL bytes directly to the selected queue, preserving the fixed layout.
+These labels do **not** go through PDF/raster conversion. Keep the Citizen in
+**ZPL / Zebra emulation** (the mode in which the supplied script already works).
+A raw CUPS queue is suitable for this mode; the OS queue must point to the actual
+USB/network printer. Receipt printing remains A4 PDF/native-driver printing and
+needs its own compatible driver/queue; do not send receipt PDFs to the raw label
+queue.
 
-### Arch Linux printing setup
+The usual queue name **Citizen_CL_S621II** is preferred in the selector. Use
+**Refresh printers** if setup happened while the app was open. **Queue status**
+shows CUPS printer state and pending jobs. Submission returns a CUPS job id;
+that acknowledgement confirms spooling, not physical paper output.
 
-Run these commands on the Arch computer (they install/start the OS printing service):
+### Install / setup
+
+Click **Install / setup** in Barcode Labels when printing support is missing.
+
+- **Linux:** when PolicyKit (`pkexec`) is available, an OS administrator prompt
+  opens and setup progress appears in the app. It installs missing CUPS tools
+  using the detected Arch (`pacman`), Debian/Ubuntu (`apt-get`) or Fedora/Amazon
+  Linux (`dnf`) package manager, then starts/enables CUPS with systemd. An existing
+  Citizen queue is retained. If exactly one connected Citizen CL-S621II USB URI
+  is discovered, it creates the `Citizen_CL_S621II` raw queue. Multiple devices,
+  undiscovered USB devices, network addresses and ports require selection in
+  Print Settings; setup does not guess a port. If `pkexec` is absent, the app
+  shows the exact `sudo` command to run in a terminal.
+- **Windows:** opens the system **Add Printer** wizard. Windows can install the
+  matching device driver, or use the manufacturer installer. Select the actual
+  USB/network port. The app then writes **RAW ZPL** through the Windows spooler;
+  no Python `pywin32` package is required. This setup needs a Windows printer
+  queue even though the label itself is already ZPL. OS administrator approval
+  may be required; the app cannot grant that permission or guess your port.
+
+Linux command-line setup is also available from the repository root:
+
+```bash
+sudo python3 app/printer_setup.py --install-citizen
+```
+
+On Arch, the manual printing-tool setup is:
 
 ```bash
 sudo pacman -S cups cups-filters
 sudo systemctl enable --now cups.service
-lpstat -r
-```
-
-Add the printer in your desktop Print Settings or [CUPS administration](http://localhost:631).
-Install a driver for the printer model that accepts PDF documents and supports
-custom label dimensions. A raw queue cannot convert the PDF to Citizen printer
-commands. Choose the correct driver/language mode for the CL-S621II and print a
-system test page before using the app. A printer being plugged in alone does not
-create a working queue. Driverless setup applies only if the device supports it.
-
-In the app, open Print → **Refresh printers**, select the configured queue, and
-print **Calibration** first. The app rejects a paused or rejecting CUPS queue
-before creating a stock batch. After sending, it shows a job id such as
-`Citizen-42`; the label Print history also keeps this id. Check queued jobs with:
-
-```bash
 lpstat -p -a
-lpstat -o
 ```
 
-For a filter/driver error, inspect `journalctl -u cups.service -n 80 --no-pager`
-and the CUPS error log on that machine. Resume or cancel jobs in Print Settings.
-Do not resubmit a timed-out job before checking the queue and physical output.
-**Setup / help** in both receipt and label dialogs includes OS-specific
-instructions. **Queue status** shows the selected Linux printer state and pending
-jobs, including driver/filter errors reported by CUPS. PDFs can be saved even
-when no printer is configured.
+Connect/power on the Citizen and use the app's setup or Print Settings to add its
+queue. If printing still produces no paper, check `lpstat -o`, the printer mode,
+queue port and media. Do not blindly resend a job after a timeout.
 
-On **Windows**, install the manufacturer's driver, print a Windows test page,
-then refresh/select the printer in the app. Source launches use the pulled code;
-an existing `.exe` needs **Update & rebuild** or the repository's `setup.bat` to
-include fixes. Linux CUPS commands are never used by the Windows print path.
+### Print history and stock
 
-### Quantity, confirmations and stock
+Durable batches retain the layout version and label fields. Stock posts once
+after acknowledged spool submission. If submission fails or times out, the batch
+stays **uncertain** and stock is not confirmed. Check the queue and physical
+output before resolving it under **Print history**. Confirming all printed posts
+the original stock once; cancelling adds no stock. For partial output, cancel
+queued output and reconcile the actual stock before reprinting missing labels.
 
-- Choose the receiving **godown** and the number of labels. **Add new stock and
-  print** adds that many **pieces** after successful submission to the OS printer.
-  Optional purchase cost per piece provides stock valuation; unknown costs remain
-  unknown. This is stock introduced directly, with known value balanced against
-  equity in accounts. Use Purchases for supplier debt/payment accounting.
-- **Reprint labels — no stock change** is the default for existing items. Labels
-  for purchases already received should use reprint mode, avoiding a second stock
-  addition. A new item requires Add new stock mode.
-- Two separate confirmations show printer, dimensions, DPI, **label count**,
-  selling price, receiving godown, stock increase, cost and correction offsets.
-  Cancelling either confirmation creates no batch and adds no stock.
-- Each job has a durable `L-` batch reference and an immutable design/data snapshot.
-  Stock posts once, atomically. **Print history → Reprint saved batch** uses the
-  original label and a user-entered replacement-label count, adding no stock even
-  if the catalog price has since changed.
-- Printer submission is not proof of paper output. A jam/error or interruption
-  leaves a job **uncertain/sending**, with no automatic retry. Check the printer
-  and queue, then either confirm that all labels printed (post the recorded stock
-  once), or cancel the unresolved batch with no stock change. Resolve an earlier
-  new-stock job before starting another for that item/godown. For partial output,
-  cancel queued pages and reconcile the actual pieces manually before reprinting
-  only the missing labels. Submitted stock is never silently reversed on reprint.
+**Reprint** uses the original saved label/price, asks for replacement quantity,
+and never adds stock. Old designer batch history is preserved; create a new
+fixed Citizen label for those items rather than reinterpreting an old drawing as
+ZPL. Scanning a printed EAN-13 finds its catalog item even when its older catalog
+code was alphanumeric; conflicting item codes are rejected.
 
-### Connected accounting and primary view
+### Run the update
 
-Chart of Accounts now opens reports on **All time**, so existing historical
-sales/expenses are visible immediately. Its top godown selector is shared across
-Account master statements, Inventory master quantities, Godowns and Reports.
-**Primary — all godowns** is the default combined view; actual shops retain their
-own quantities, stock movements and transactions. It is not an extra stock
-location and does not double-count the other shops. **Default shop** remains the
-real location for previously unallocated stock, older sales and employee sales.
-Catalog definitions (category/brand/item) are shared; per-shop inventory lists only
-items allocated to that shop. Known-value label stock additions also appear in
-accounts. A compact section chooser makes all admin tabs reachable on small screens.
-
-### Run from Python
-
-Windows, from the repository root:
-
-```bat
-py -m venv .venv
-.venv\Scripts\python.exe -m pip install -r app\requirements.txt
-.venv\Scripts\python.exe app\main.py
-```
-
-Linux, from the repository root:
+Linux/source, after pulling the existing task branch:
 
 ```bash
-python3 -m venv .venv
-.venv/bin/python -m pip install -r app/requirements.txt
-.venv/bin/python app/main.py
+python3 -m pip install -r app/requirements.txt
+python3 app/main.py
 ```
 
-Linux needs a graphical desktop with Qt's system libraries and a configured CUPS
-printer for physical printing. Both source copies use the same user-profile shop
-database; take a Backup before testing with real shop data.
+Windows source:
+
+```powershell
+py -3.13 -m pip install -r app/requirements.txt
+py -3.13 app/main.py
+```
+
+An existing Windows executable must be rebuilt using **Update & rebuild** or
+`setup.bat`. Both app copies use the same ZPL generation and durable stock code.
+Windows RAW spooler API behavior is tested with a stub on Linux; native Windows
+execution and physical printer/media output still require checks on those devices.
+The built-in Citizen font determines available glyphs; hex escaping preserves
+UTF-8 data safely but does not install extra fonts on the printer.
