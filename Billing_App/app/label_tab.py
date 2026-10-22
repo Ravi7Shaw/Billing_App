@@ -30,7 +30,7 @@ class LabelElement(QGraphicsItem):
         self.setFlags(QGraphicsItem.ItemIsSelectable | QGraphicsItem.ItemIsMovable | QGraphicsItem.ItemSendsGeometryChanges)
         self.setPos((data['x']+owner.offset_x.value())*PX_PER_MM, (data['y']+owner.offset_y.value())*PX_PER_MM)
         self.setRotation(data.get('rotation', 0))
-        self.setToolTip('Drag to move. Drag the lower-right handle to resize. Use properties for exact mm.')
+        self.setToolTip('Double-click to edit text. Drag to move. Drag the lower-right handle to resize. Use properties for exact mm.')
 
     def boundingRect(self):
         return QRectF(0,0,self.data['w']*PX_PER_MM,self.data['h']*PX_PER_MM)
@@ -62,6 +62,15 @@ class LabelElement(QGraphicsItem):
         if self.resizing:
             self.setSelected(True);event.accept()
         else:super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self,event):
+        if self.data['kind'] in ('text','barcode','qr'):
+            self.owner.scene.clearSelection()
+            self.setSelected(True)
+            self.owner.guard(self.owner.edit_text)
+            event.accept()
+        else:
+            super().mouseDoubleClickEvent(event)
 
     def mouseMoveEvent(self,event):
         if self.resizing:
@@ -164,6 +173,7 @@ class LabelTab(QWidget):
         tools=QHBoxLayout();canvas_layout.addLayout(tools)
         self.kind=combo([(s.title(),s) for s in ('text','barcode','qr','rectangle','line','image')]);tools.addWidget(self.kind)
         button('Add',lambda:self.guard(self.add_element),tools)
+        self.edit_text_button=button('Edit text',lambda:self.guard(self.edit_text),tools)
         button('Undo',self.undo,tools);button('Redo',self.redo,tools)
         self.scene=QGraphicsScene(self);self.view=PaperView(self.scene)
         self.view.setBackgroundBrush(QColor('#dce2e6'))
@@ -172,9 +182,10 @@ class LabelTab(QWidget):
         canvas_layout.addWidget(self.view,1)
         self.scene.selectionChanged.connect(self.selected)
         self.preview_status=note('',canvas_layout)
+        self.view.setToolTip('Double-click text on the label to type, or select it and click Edit text.')
         self.editor_tabs.addTab(canvas,'Live paper preview')
         props=QWidget();form=QFormLayout(props);form.setRowWrapPolicy(QFormLayout.WrapLongRows)
-        self.text=QPlainTextEdit();self.text.setMaximumHeight(90);form.addRow('Text / barcode data template',self.text)
+        self.text=QPlainTextEdit();self.text.setPlaceholderText('Type your label text here. Click Apply properties to save.');self.text.setMaximumHeight(90);form.addRow('Text / barcode data template',self.text)
         self.font=QFontComboBox();form.addRow('Font (installed fonts)',self.font)
         self.font_size=number(maximum=150);self.font_size.setMinimum(1);self.font_size.setValue(10);form.addRow('Font size (pt)',self.font_size)
         self.bold=QCheckBox('Bold');self.italic=QCheckBox('Italic');self.underline=QCheckBox('Underline')
@@ -356,6 +367,27 @@ class LabelTab(QWidget):
             if len(data)>3_000_000 or QImage.fromData(data).isNull():raise ValueError('Choose an image up to 3 MB.')
             e['image']=base64.b64encode(data).decode();e['text']=''
         self.remember();self.document['elements'].append(e);self.rebuild(len(self.document['elements'])-1)
+        if kind=='text':self.edit_text()
+
+    def edit_text(self):
+        item=self.selected_item()
+        if not item or item.data['kind'] not in ('text','barcode','qr'):
+            raise ValueError('Select a text, barcode or QR box on the label first, or add a Text box.')
+        index=next(i for i,e in enumerate(self.document['elements']) if e is item.data)
+        dialog=QDialog(self);dialog.setWindowTitle('Edit label text')
+        layout=QVBoxLayout(dialog)
+        note('Type your text below. Use multiple lines if needed. Fields such as {name} and {rate} insert item details.',layout)
+        editor=QPlainTextEdit(item.data.get('text',''));editor.setObjectName('labelTextEditor')
+        editor.setPlaceholderText('Type label text…');layout.addWidget(editor,1)
+        buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel)
+        buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
+        fit_window(dialog,520,320)
+        editor.selectAll();editor.setFocus()
+        if dialog.exec()!=QDialog.Accepted:return
+        self.db.get_label_templates()  # Recheck admin access after the modal editor.
+        value=editor.toPlainText()
+        if value!=item.data.get('text',''):
+            self.remember();item.data['text']=value;self.rebuild(index)
 
     def apply_properties(self):
         item=self.selected_item()

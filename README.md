@@ -431,7 +431,10 @@ printer driver rather than sending printer-language commands directly.
 - Add and drag text, Code 128, QR, rectangles, lines and logo images. Drag the
   selected element's lower-right handle to resize, or enter exact X/Y/width/height
   in millimetres under **Selected element properties**. Rotate, align, duplicate,
-  delete, reorder layers, undo or redo. Click **Apply properties** after editing.
+  delete, reorder layers, undo or redo. **Double-click text on the paper** or
+  select a text/barcode/QR box and click **Edit text** to type into a multiline
+  writing box, then **Save**. Adding a Text box opens this editor automatically.
+  For font, position and other property changes, click **Apply properties**.
 - Font selection includes every font installed on the current computer, with
   point size, bold, italic, underline and colour controls. Install the same fonts
   on Linux and Windows for matching typography. Thermal printers print in their

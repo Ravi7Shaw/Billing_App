@@ -154,6 +154,48 @@ class LabelTests(unittest.TestCase):
             self.assertIsNotNone(decoded);self.assertEqual(decoded.text,tab.context['metadata'])
         tab.undo();self.assertEqual(tab.document,original)
 
+    def test_double_click_text_opens_writing_box_and_saves_with_undo(self):
+        from PySide6.QtCore import QTimer,QPointF
+        from PySide6.QtTest import QTest
+        from PySide6.QtWidgets import QPlainTextEdit
+        tab=LabelTab(self.role);self.addCleanup(tab.close)
+        tab.item.setCurrentIndex(tab.item.findData(self.item))
+        tab.pages.setCurrentIndex(1);tab.resize(800,600);tab.show();QTest.qWait(30)
+        original=tab.document['elements'][0]['text'];written='My shop\nDenim {size}'
+        def type_and_save():
+            dialog=QApplication.activeModalWidget()
+            editor=dialog.findChild(QPlainTextEdit,'labelTextEditor')
+            editor.selectAll();QTest.keyClicks(editor,'My shop');QTest.keyClick(editor,Qt.Key_Return)
+            QTest.keyClicks(editor,'Denim {size}');dialog.accept()
+        QTimer.singleShot(50,type_and_save)
+        point=tab.view.mapFromScene(QPointF(10*96/25.4,6*96/25.4))
+        QTest.mouseDClick(tab.view.viewport(),Qt.LeftButton,pos=point)
+        self.assertEqual(tab.document['elements'][0]['text'],written)
+        self.assertEqual(tab.text.toPlainText(),written)
+        tab.undo();self.assertEqual(tab.document['elements'][0]['text'],original)
+        tab.redo();self.assertEqual(tab.document['elements'][0]['text'],written)
+
+    def test_edit_text_cancel_and_new_text_entry(self):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QPlainTextEdit
+        tab=LabelTab(self.role);self.addCleanup(tab.close)
+        tab.rebuild(0);original=json.loads(json.dumps(tab.document))
+        def cancel():
+            dialog=QApplication.activeModalWidget()
+            dialog.findChild(QPlainTextEdit,'labelTextEditor').setPlainText('Do not save')
+            dialog.reject()
+        QTimer.singleShot(0,cancel);tab.edit_text_button.click()
+        self.assertEqual(tab.document,original)
+        def save():
+            dialog=QApplication.activeModalWidget()
+            dialog.findChild(QPlainTextEdit,'labelTextEditor').setPlainText('Custom label')
+            dialog.accept()
+        tab.kind.setCurrentIndex(tab.kind.findData('text'))
+        QTimer.singleShot(0,save);tab.add_element()
+        self.assertEqual(tab.document['elements'][-1]['text'],'Custom label')
+        tab.rebuild(3);QTimer.singleShot(0,save);tab.edit_text()
+        self.assertEqual(tab.document['elements'][3]['text'],'Custom label')
+
     def test_pdf_has_exact_user_page_dimensions_and_label_count(self):
         try:from pypdf import PdfReader
         except ImportError:self.skipTest('Install tests/requirements-labels.txt for PDF page measurement')
