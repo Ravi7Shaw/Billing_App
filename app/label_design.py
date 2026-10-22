@@ -11,12 +11,12 @@ from string import Formatter
 
 from barcode import Code128
 import qrcode
-from PySide6.QtCore import Qt, QRectF, QSizeF, QMarginsF
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage, QPainter, QPageLayout, QPageSize, QPen, QTransform
+from PySide6.QtCore import Qt, QRectF, QSizeF, QMarginsF, QPointF
+from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage, QPainter, QPageLayout, QPageSize, QPen, QTransform, QPolygonF
 from PySide6.QtPrintSupport import QPrinter
 
 PX_PER_MM = 96 / 25.4
-KINDS = ('text', 'barcode', 'qr', 'rectangle', 'line', 'image')
+KINDS = ('text', 'barcode', 'qr', 'rectangle', 'ellipse', 'triangle', 'line', 'image')
 
 
 def default_design():
@@ -201,13 +201,16 @@ def draw_element(painter, e, metadata, scale):
                 for col, black in enumerate(values):
                     if black:
                         painter.drawRect(QRectF(x+col*unit,y+row*unit,unit,unit))
-    elif kind in ('rectangle', 'line'):
+    elif kind in ('rectangle', 'ellipse', 'triangle', 'line'):
         painter.setPen(QPen(QColor(e.get('color','#000000')), max(.15*scale, 1)))
         painter.setBrush(QColor(e.get('fill','#ffffff')) if e.get('filled') else Qt.NoBrush)
         if kind == 'line':
             painter.drawLine(rect.topLeft(), rect.bottomRight())
         else:
-            painter.drawRect(rect.adjusted(.1*scale,.1*scale,-.1*scale,-.1*scale))
+            inset=rect.adjusted(.1*scale,.1*scale,-.1*scale,-.1*scale)
+            if kind=='ellipse':painter.drawEllipse(inset)
+            elif kind=='triangle':painter.drawPolygon(QPolygonF([QPointF(inset.center().x(),inset.top()),inset.bottomRight(),inset.bottomLeft()]))
+            else:painter.drawRect(inset)
     elif kind == 'image':
         image = QImage.fromData(base64.b64decode(e['image']))
         target = QSizeF(image.size())

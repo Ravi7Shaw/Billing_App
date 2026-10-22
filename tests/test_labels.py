@@ -196,6 +196,49 @@ class LabelTests(unittest.TestCase):
         tab.rebuild(3);QTimer.singleShot(0,save);tab.edit_text()
         self.assertEqual(tab.document['elements'][3]['text'],'Custom label')
 
+    def test_text_style_and_dimensions_save_cancel_undo_and_template(self):
+        from PySide6.QtCore import QTimer
+        from PySide6.QtWidgets import QFontComboBox,QDoubleSpinBox,QCheckBox
+        tab=LabelTab(self.role);self.addCleanup(tab.close);tab.rebuild(0)
+        original=json.loads(json.dumps(tab.document))
+        def style(accept):
+            dialog=QApplication.activeModalWidget()
+            font=dialog.findChild(QFontComboBox,'labelTextFont');font.setCurrentIndex(0)
+            dialog.findChild(QDoubleSpinBox,'labelTextSize').setValue(18)
+            dialog.findChild(QDoubleSpinBox,'labelTextW').setValue(80)
+            dialog.findChild(QDoubleSpinBox,'labelTextH').setValue(16)
+            for key in ('Bold','Italic','Underline'):dialog.findChild(QCheckBox,'labelText'+key).setChecked(True)
+            self.chosen_font=font.currentFont().family()
+            dialog.accept() if accept else dialog.reject()
+        QTimer.singleShot(0,lambda:style(False));tab.edit_text();self.assertEqual(tab.document,original)
+        QTimer.singleShot(0,lambda:style(True));tab.edit_text_button.click()
+        element=tab.document['elements'][0]
+        self.assertEqual((element['font'],element['size'],element['w'],element['h']),(self.chosen_font,18,80,16))
+        self.assertTrue(all(element[k] for k in ('bold','italic','underline')))
+        self.db.save_label_template('Styled',tab.document)
+        self.assertEqual(json.loads(self.db.get_label_templates()[0]['document']),tab.document)
+        tab.undo();self.assertEqual(tab.document,original)
+        tab.redo();self.assertEqual(tab.document['elements'][0],element)
+
+    def test_shape_tools_properties_and_rendered_geometry(self):
+        tab=LabelTab(self.role);self.addCleanup(tab.close)
+        for kind in ('rectangle','ellipse','triangle','line'):
+            tab.kind.setCurrentIndex(tab.kind.findData(kind));tab.add_element()
+            self.assertEqual(tab.editor_tabs.currentIndex(),1)
+            self.assertEqual(tab.shape.currentData(),kind)
+            tab.coords['w'].setValue(20);tab.coords['h'].setValue(20)
+            tab.filled.setChecked(True);tab.ink='#000000';tab.fill_color='#000000'
+            tab.apply_properties();element=tab.document['elements'][-1]
+            document=dict(version=1,width=30,height=30,elements=[dict(element,x=5,y=5)])
+            validate_design(document,{},203)
+            image=QImage(300,300,QImage.Format_RGB32);image.fill(Qt.white)
+            painter=QPainter(image);paint_label(painter,document,{},254);painter.end()
+            self.assertLess(image.pixelColor(150,150).lightness(),50)
+            if kind in ('ellipse','triangle'):self.assertGreater(image.pixelColor(55,55).lightness(),200)
+            tab.shape.setCurrentIndex(tab.shape.findData('ellipse'));tab.apply_properties()
+            self.assertEqual(tab.document['elements'][-1]['kind'],'ellipse')
+            tab.undo();self.assertEqual(tab.document['elements'][-1]['kind'],kind)
+
     def test_pdf_has_exact_user_page_dimensions_and_label_count(self):
         try:from pypdf import PdfReader
         except ImportError:self.skipTest('Install tests/requirements-labels.txt for PDF page measurement')

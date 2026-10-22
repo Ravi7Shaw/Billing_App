@@ -432,9 +432,11 @@ printer driver rather than sending printer-language commands directly.
   selected element's lower-right handle to resize, or enter exact X/Y/width/height
   in millimetres under **Selected element properties**. Rotate, align, duplicate,
   delete, reorder layers, undo or redo. **Double-click text on the paper** or
-  select a text/barcode/QR box and click **Edit text** to type into a multiline
-  writing box, then **Save**. Adding a Text box opens this editor automatically.
-  For font, position and other property changes, click **Apply properties**.
+  select a text/barcode/QR box and click **Edit / style** to type into a multiline
+  writing box, choose **font, size, bold, italic, underline, alignment and box dimensions**, then **Save**. Adding a Text box opens this editor automatically.
+  Choose **Rectangle, Ellipse, Triangle or Line** and click **Add** to insert a shape.
+  **Edit / style** or double-click opens shape properties for dimensions, rotation,
+  border/fill colours and shape type; click **Apply properties**.
 - Font selection includes every font installed on the current computer, with
   point size, bold, italic, underline and colour controls. Install the same fonts
   on Linux and Windows for matching typography. Thermal printers print in their

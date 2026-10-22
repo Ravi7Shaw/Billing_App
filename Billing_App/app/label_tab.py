@@ -64,10 +64,10 @@ class LabelElement(QGraphicsItem):
         else:super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self,event):
-        if self.data['kind'] in ('text','barcode','qr'):
+        if self.data['kind'] in ('text','barcode','qr','rectangle','ellipse','triangle','line'):
             self.owner.scene.clearSelection()
             self.setSelected(True)
-            self.owner.guard(self.owner.edit_text)
+            self.owner.guard(self.owner.edit_selected)
             event.accept()
         else:
             super().mouseDoubleClickEvent(event)
@@ -171,9 +171,9 @@ class LabelTab(QWidget):
         self.editor_tabs=QTabWidget();layout.addWidget(self.editor_tabs,1)
         canvas=QWidget();canvas_layout=QVBoxLayout(canvas);canvas_layout.setContentsMargins(0,0,0,0)
         tools=QHBoxLayout();canvas_layout.addLayout(tools)
-        self.kind=combo([(s.title(),s) for s in ('text','barcode','qr','rectangle','line','image')]);tools.addWidget(self.kind)
+        self.kind=combo([(s.title(),s) for s in ('text','barcode','qr','rectangle','ellipse','triangle','line','image')]);tools.addWidget(self.kind)
         button('Add',lambda:self.guard(self.add_element),tools)
-        self.edit_text_button=button('Edit text',lambda:self.guard(self.edit_text),tools)
+        self.edit_text_button=button('Edit / style',lambda:self.guard(self.edit_selected),tools)
         button('Undo',self.undo,tools);button('Redo',self.redo,tools)
         self.scene=QGraphicsScene(self);self.view=PaperView(self.scene)
         self.view.setBackgroundBrush(QColor('#dce2e6'))
@@ -182,7 +182,7 @@ class LabelTab(QWidget):
         canvas_layout.addWidget(self.view,1)
         self.scene.selectionChanged.connect(self.selected)
         self.preview_status=note('',canvas_layout)
-        self.view.setToolTip('Double-click text on the label to type, or select it and click Edit text.')
+        self.view.setToolTip('Double-click text on the label to type, or select it and click Edit / style.')
         self.editor_tabs.addTab(canvas,'Live paper preview')
         props=QWidget();form=QFormLayout(props);form.setRowWrapPolicy(QFormLayout.WrapLongRows)
         self.text=QPlainTextEdit();self.text.setPlaceholderText('Type your label text here. Click Apply properties to save.');self.text.setMaximumHeight(90);form.addRow('Text / barcode data template',self.text)
@@ -193,11 +193,12 @@ class LabelTab(QWidget):
         for field in (self.bold,self.italic,self.underline):font_styles.addWidget(field)
         form.addRow(font_styles)
         self.align=combo([(s,s) for s in ('left','center','right')]);form.addRow('Alignment',self.align)
+        self.shape=combo([(s.title(),s) for s in ('rectangle','ellipse','triangle','line')]);form.addRow('Shape',self.shape)
         self.coords={}
         for key,title in [('x','X mm'),('y','Y mm'),('w','Width mm'),('h','Height mm'),('rotation','Rotation °')]:
             field=number(maximum=500 if key!='rotation' else 359);field.setMinimum(-500 if key in ('x','y') else 0)
             self.coords[key]=field;form.addRow(title,field)
-        self.ink='#000000';self.fill_color='#ffffff';self.filled=QCheckBox('Fill rectangle');form.addRow(self.filled)
+        self.ink='#000000';self.fill_color='#ffffff';self.filled=QCheckBox('Fill shape');form.addRow(self.filled)
         colors=QHBoxLayout();form.addRow(colors)
         button('Text / border colour',lambda:self.choose_color(False),colors)
         button('Fill colour',lambda:self.choose_color(True),colors)
@@ -346,7 +347,9 @@ class LabelTab(QWidget):
         if self._loading:return
         item=self.selected_item()
         if not item:return
-        e=item.data;self.text.setPlainText(e.get('text',''));self.font.setCurrentFont(QFont(e.get('font','Arial')))
+        e=item.data;self.shape.setEnabled(e['kind'] in ('rectangle','ellipse','triangle','line'))
+        self.shape.setCurrentIndex(self.shape.findData(e['kind']))
+        self.text.setPlainText(e.get('text',''));self.font.setCurrentFont(QFont(e.get('font','Arial')))
         self.font_size.setValue(e.get('size',10))
         for key,field in self.coords.items():field.setValue(e.get(key,0))
         for field,key in [(self.bold,'bold'),(self.italic,'italic'),(self.underline,'underline'),(self.filled,'filled')]:field.setChecked(bool(e.get(key)))
@@ -368,31 +371,61 @@ class LabelTab(QWidget):
             e['image']=base64.b64encode(data).decode();e['text']=''
         self.remember();self.document['elements'].append(e);self.rebuild(len(self.document['elements'])-1)
         if kind=='text':self.edit_text()
+        elif kind in ('rectangle','ellipse','triangle','line'):self.edit_selected()
+
+    def edit_selected(self):
+        item=self.selected_item()
+        if not item:raise ValueError('Select a box on the paper first, or choose an element and click Add.')
+        if item.data['kind'] in ('text','barcode','qr'):self.edit_text()
+        else:
+            self.selected();self.editor_tabs.setCurrentIndex(1)
 
     def edit_text(self):
         item=self.selected_item()
         if not item or item.data['kind'] not in ('text','barcode','qr'):
             raise ValueError('Select a text, barcode or QR box on the label first, or add a Text box.')
         index=next(i for i,e in enumerate(self.document['elements']) if e is item.data)
-        dialog=QDialog(self);dialog.setWindowTitle('Edit label text')
+        dialog=QDialog(self);dialog.setWindowTitle('Edit label text and style')
         layout=QVBoxLayout(dialog)
         note('Type your text below. Use multiple lines if needed. Fields such as {name} and {rate} insert item details.',layout)
         editor=QPlainTextEdit(item.data.get('text',''));editor.setObjectName('labelTextEditor')
-        editor.setPlaceholderText('Type label text…');layout.addWidget(editor,1)
+        editor.setPlaceholderText('Type label text…');editor.setMinimumHeight(60);editor.setMaximumHeight(110);layout.addWidget(editor)
+        style_panel=QWidget();style_form=QFormLayout(style_panel)
+        style_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        font=QFontComboBox();font.setObjectName('labelTextFont');font.setCurrentFont(QFont(item.data.get('font','Arial')))
+        size=number(maximum=150);size.setMinimum(1);size.setValue(item.data.get('size',10));size.setObjectName('labelTextSize')
+        style_form.addRow('Font',font);style_form.addRow('Font size (pt)',size)
+        styles={}
+        row=QHBoxLayout()
+        for key in ('bold','italic','underline'):
+            field=QCheckBox(key.title());field.setObjectName('labelText'+key.title());field.setChecked(bool(item.data.get(key)));styles[key]=field;row.addWidget(field)
+        style_form.addRow(row)
+        alignment=combo([(v.title(),v) for v in ('left','center','right')]);alignment.setCurrentIndex(alignment.findData(item.data.get('align','left')))
+        style_form.addRow('Alignment',alignment)
+        dimensions={}
+        for key,title in (('w','Box width (mm)'),('h','Box height (mm)')):
+            field=number(maximum=500);field.setMinimum(.1);field.setValue(item.data[key]);field.setObjectName('labelText'+key.upper());dimensions[key]=field;style_form.addRow(title,field)
+        style_panel.setEnabled(item.data['kind']=='text')
+        layout.addWidget(scroll(style_panel),1)
         buttons=QDialogButtonBox(QDialogButtonBox.Save|QDialogButtonBox.Cancel)
         buttons.accepted.connect(dialog.accept);buttons.rejected.connect(dialog.reject);layout.addWidget(buttons)
-        fit_window(dialog,520,320)
+        fit_window(dialog,540,560)
         editor.selectAll();editor.setFocus()
         if dialog.exec()!=QDialog.Accepted:return
         self.db.get_label_templates()  # Recheck admin access after the modal editor.
-        value=editor.toPlainText()
-        if value!=item.data.get('text',''):
-            self.remember();item.data['text']=value;self.rebuild(index)
+        updated=deepcopy(item.data);updated['text']=editor.toPlainText()
+        if item.data['kind']=='text':
+            updated.update(font=font.currentFont().family(),size=size.value(),align=alignment.currentData())
+            updated.update({key:field.isChecked() for key,field in styles.items()})
+            updated.update({key:field.value() for key,field in dimensions.items()})
+        if updated!=item.data:
+            self.remember();item.data.update(updated);self.rebuild(index)
 
     def apply_properties(self):
         item=self.selected_item()
         if not item:raise ValueError('Select an element on the paper first.')
         index=next(i for i,e in enumerate(self.document['elements']) if e is item.data);self.remember()
+        if item.data['kind'] in ('rectangle','ellipse','triangle','line'):item.data['kind']=self.shape.currentData()
         item.data.update({key:field.value() for key,field in self.coords.items()})
         item.data.update(text=self.text.toPlainText(),font=self.font.currentFont().family(),size=self.font_size.value(),bold=self.bold.isChecked(),italic=self.italic.isChecked(),underline=self.underline.isChecked(),align=self.align.currentText(),color=self.ink,fill=self.fill_color,filled=self.filled.isChecked())
         self.rebuild(index)
