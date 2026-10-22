@@ -70,6 +70,10 @@ class ExpensesTab(QWidget):
         self.date_input.setMaximumDate(QDate.currentDate())
         self.date_input.setDisplayFormat("dd/MM/yyyy")
         form.addRow("Date:", self.date_input)
+        self.godown_input = QComboBox()
+        for location in self.db.get_godowns():
+            self.godown_input.addItem(location['name'], location['id'])
+        form.addRow('Godown:', self.godown_input)
 
         self.category_input = QComboBox()
         self.category_input.setEditable(True)
@@ -213,6 +217,7 @@ class ExpensesTab(QWidget):
         try:
             self.db.add_expense(
                 expense_date=expense_date,
+                godown_id=self.godown_input.currentData() or 1,
                 category=category,
                 amount=amount,
                 payment_mode=payment_mode,
@@ -251,6 +256,13 @@ class ExpensesTab(QWidget):
             return
 
         self._refresh_category_filter()
+        selected = self.godown_input.currentData()
+        self.godown_input.clear()
+        for location in self.db.get_godowns():
+            self.godown_input.addItem(location['name'], location['id'])
+        index = self.godown_input.findData(selected)
+        if index >= 0:
+            self.godown_input.setCurrentIndex(index)
 
         try:
             start_date, end_date = self.period.bounds()

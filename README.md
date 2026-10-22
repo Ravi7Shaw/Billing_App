@@ -293,3 +293,120 @@ separate people with the same name. Choose a month, then select the employee.
   records. Existing employee IDs, roles, optional fields, and attendance remain
   intact. Older expenses without an employee link remain shop expenses; the app
   does not guess which employee they belong to.
+
+## Purchases, Chart of Accounts and godowns
+
+These screens appear after **Admin** login in both desktop copies. Employee
+billing stays in **Default shop / Retail**. The same SQLite database and Backup
+button include all purchase, account and location records.
+
+### First-time setup
+
+1. Back up the existing database using **Backup** before installing the update.
+2. Open **Chart of Accounts → Inventory master**. Stock categories/items share
+   the existing Inventory catalog. Create stock groups (for example, Jeans with
+   specification Denim), and units such as **Bundle = 50 pieces**. Select an item
+   and use **Configure selected item** to assign its group and preferred unit.
+   Existing brand/style, size, colour, barcode and selling-price editing remains
+   available under **Inventory**.
+3. Open **Godowns → Manage godowns** to create each shop/location. **Main Godown**
+   is a combined view, not an extra location containing duplicate stock.
+   Existing stock is assigned once to **Default shop**. Transfers move pieces
+   and their recorded cost between locations atomically.
+4. Enter **Opening stock / cost** before posting the first purchase, sale or
+   transfer for an item/location. This sets total opening pieces and purchase
+   cost per piece, excluding recoverable GST. Existing stock has **unknown cost**
+   until a cost is supplied; the app never guesses costs from selling prices.
+5. Under **Account master → Groups**, create account groups and choose their
+   accounting nature (Asset, Liability, Income, Expense or Equity). Groups are
+   separate from stock categories. Add supplier/general ledgers with their group,
+   phone, optional GSTIN and address. Customer ledgers are linked automatically
+   to Customers. Existing bills and payments appear automatically in statements.
+
+### Purchase workflow
+
+- **Purchases**, or **Chart of Accounts → New purchase**, opens the purchase form.
+- Select a supplier ledger, invoice number, date, receiving godown and GST mode.
+  Enter seller and buyer **name and phone**; **addresses are optional**.
+- **Without GST:** neither party needs a GSTIN and every line's GST is zero.
+  **With GST:** both GSTINs must have the 15-character GSTIN format; the admin
+  enters each line's GST percentage. Rates are **before GST**. This is a purchase
+  record, not GST return filing or an online GSTIN verification service.
+- Select stock items and units, quantity, purchase rate per unit and optional
+  rupee discount per line. For example, 2 Bundles of 50 pieces add 100 pieces.
+  Unit size, item name, rate, tax and party details are saved as snapshots, so
+  subsequent master edits do not rewrite receipts.
+- Enter **Paid now** (zero is valid). A ₹50,000 purchase with ₹25,000 paid adds
+  the stock and leaves ₹25,000 payable in the supplier ledger. Stock, purchase
+  lines and initial payment commit together; a failed save rolls everything back.
+- Use **Last receipt** or select the purchase in **Reports → Purchases → Open
+  purchase receipt** for Print / Save PDF. Duplicate invoice numbers for the
+  same supplier are rejected. Posted purchases are retained as transaction history.
+
+### Ledgers and vouchers
+
+- **Account master** shows date-filtered journal entries or one selected ledger
+  with opening and closing balance. Positive balances are debit, negative credit.
+  Sales (retail/wholesale), purchases, GST, receipts, payments, recorded expenses
+  and known cost of sales feed the ledger from their source documents.
+- **Voucher → Payment**, allocated to a purchase, settles supplier debt.
+  **Voucher → Receipt**, allocated to a sale, settles customer debt. Amounts cannot
+  exceed the remaining invoice balance. For allocations, the invoice determines
+  the party and godown; debit/credit selections are disabled.
+- Leave the invoice unallocated to record an advance/token payment. Payment
+  debits the supplier and credits Cash / bank; Receipt debits Cash / bank and
+  credits the customer. **Apply advance** selects an existing voucher and invoice
+  belonging to the same party, and applies up to the remaining advance/balance.
+  Allocation does not count the cash movement twice.
+- Journal, Credit note, Debit note and Opening balance vouchers require distinct
+  debit/credit ledgers, an amount, date, godown and narration. They adjust account
+  balances; they do **not** alter stock quantities or invoice balances. Use invoice
+  allocations to settle invoices, and stock transfers/opening stock for quantities.
+- Cash / bank is a combined settlement account. Customer profiles are edited in
+  Customers; supplier/general ledgers and account groups can be edited here.
+
+### Sales, expenses and reports
+
+Admin **New Bill** offers **Retail / Wholesale** and a selling godown. Prices and
+sales quantities are per **piece**, and the existing admin discount/partial-payment
+controls apply to either channel. Exchanges return stock to the original sale's
+godown, retain its channel and reverse the original recorded cost. Expenses can
+also be assigned to a godown; existing expenses and employee salary expenses
+belong to Default shop.
+
+**Chart of Accounts → Reports** contains:
+
+- **Master / Profit & loss:** net sales, net purchases, known cost of sold items,
+  expenses, journal adjustments, profit/loss, unknown-cost count, stock in/out,
+  and retail/wholesale sales totals.
+- **Sales:** invoice, customer, godown, channel, net/GST/total, paid, balance and cost.
+- **Purchases:** supplier invoice, godown, net/GST/total, paid and balance; reprint
+  a selected purchase receipt.
+- **Stock in / out:** piece movements, location, item and reference, including
+  purchases, sales, exchanges, transfers and inventory adjustments.
+- CSV export of each report and ledger statement, with spreadsheet-formula escaping.
+
+Date and godown filters apply to reports. The channel filter affects sales only;
+shop expenses are not apportioned between retail and wholesale. Paid/balance
+columns show settlement **to date** for invoices in the selected period. Stock
+quantities/value in the Godowns and Inventory master views are **current**.
+Combined stock movement totals include transfers in and out, labelled accordingly.
+
+Profit = sales excluding GST − recorded cost of sold items − expenses + journal
+income/expense adjustments. Purchases become inventory; unsold stock is not
+immediately deducted from profit. Cost uses **moving weighted average in posting
+order**. Backdated entries do not recost earlier sales. Opening stock postings are
+balanced against opening-stock equity. GST is tracked separately as input/output
+GST; these screens do not prepare statutory tax returns.
+
+Historical sales lack purchase-cost snapshots, and the previous billing policy
+allows sales beyond recorded stock. Such lines have **unknown cost** and the
+report displays **Incomplete** instead of asserting a profit figure. Sales still
+use only the selected godown's available recorded stock. Old Inventory aggregate
+quantity adjustments apply their difference to Default shop and mark cost unknown
+when no cost was supplied; use purchases for costed stock receipts. Opening costs
+cannot be rewritten after an item's first location transaction. These rules protect
+prior recorded costs and avoid inventing historical valuations.
+
+The older Statistics card previously called Net Profit is labelled **Sales less
+expenses**; use Chart of Accounts for the cost-based profit calculation.

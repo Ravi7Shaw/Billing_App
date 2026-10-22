@@ -55,6 +55,7 @@ class ExchangeCart(BillingTab):
     def _apply_permissions(self):
         super()._apply_permissions()
         # Exchange settlement always uses today's date and the full difference.
+        self.sale_options.hide()
         self.payment_form.setRowVisible(self.payment_amount_input, False)
         self.payment_form.labelForField(self.balance_label).hide()
         for index in range(self.date_row.count()):

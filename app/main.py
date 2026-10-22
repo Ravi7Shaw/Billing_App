@@ -28,6 +28,7 @@ from database import Database
 from access import AccessSession, RoleDatabase
 from theme import STYLESHEET
 from billing_tab import BillingTab
+from commerce_ui import PurchasesTab, ChartAccountsTab
 from inventory_tab import InventoryTab
 from customers_tab import CustomersTab
 from sales_tab import SalesTab
@@ -98,11 +99,16 @@ class MainWindow(QMainWindow):
             self.tabs.removeTab(0)
             widget.hide()
             widget.deleteLater()
-        for name in ("inventory", "customers", "balances", "expenses", "sales", "stats", "status", "offers", "exchanges", "employees"):
+        for name in ("inventory", "customers", "balances", "expenses", "sales", "stats", "status", "offers", "exchanges", "employees", "purchases", "accounts"):
             setattr(self, name + "_tab", None)
         self.billing_tab = BillingTab(self.db, on_bill_saved=self._on_bill_saved)
         self.tabs.addTab(self.billing_tab, "New Bill")
         if self.session.is_admin:
+            self.purchases_tab = PurchasesTab(self.db, on_saved=self._on_catalog_changed)
+            self.accounts_tab = ChartAccountsTab(self.db, on_changed=self._on_catalog_changed,
+                on_purchase=lambda: self.tabs.setCurrentWidget(self.purchases_tab))
+            self.tabs.addTab(self.purchases_tab, "Purchases")
+            self.tabs.addTab(self.accounts_tab, "Chart of Accounts")
             self.customers_tab = CustomersTab(self.db, autoload=False)
             self.balances_tab = BalancesTab(self.db, autoload=False)
             self.expenses_tab = ExpensesTab(self.db, autoload=False)
@@ -126,7 +132,7 @@ class MainWindow(QMainWindow):
 
         for index in range(1, self.tabs.count()):
             widget = self.tabs.widget(index)
-            if widget is not self.stats_tab:
+            if widget not in (self.stats_tab, self.purchases_tab, self.accounts_tab):
                 scroll_page(widget)
         self.tabs.setCurrentIndex(0)
         self.tabs.blockSignals(False)
@@ -160,8 +166,8 @@ class MainWindow(QMainWindow):
     def _update_app(self):
         if not self.session.is_admin:
             return
-        if self.billing_tab.cart:
-            QMessageBox.information(self, "Finish the bill", "Complete or clear the current bill before updating.")
+        if self.billing_tab.cart or (self.purchases_tab and self.purchases_tab.lines):
+            QMessageBox.information(self, "Finish the bill", "Complete or clear the current sale or purchase before updating.")
             return
         UpdateDialog(self.db, self).exec()
 
@@ -172,6 +178,8 @@ class MainWindow(QMainWindow):
 
     def _on_catalog_changed(self):
         self.billing_tab.refresh_catalog()
+        if self.purchases_tab:
+            self.purchases_tab.refresh()
 
     def _on_bill_saved(self):
         if not self.session.is_admin:
@@ -185,7 +193,9 @@ class MainWindow(QMainWindow):
             return
         widget = self.tabs.widget(index)
 
-        if widget is self.sales_tab:
+        if widget in (self.purchases_tab, self.accounts_tab):
+            widget.refresh()
+        elif widget is self.sales_tab:
             self.sales_tab.refresh()
         elif widget is self.stats_tab:
             self.stats_tab.refresh()

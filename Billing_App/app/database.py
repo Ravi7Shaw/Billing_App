@@ -28,6 +28,7 @@ from reporting import ReportingQueries, money_cents, MoneySum
 from offers import OfferQueries
 from exchanges import ExchangeQueries
 from employees import EmployeeQueries
+from commerce import CommerceQueries
 
 DB_FILENAME = "cloth_shop.db"
 
@@ -142,7 +143,7 @@ STARTER_SUBTYPES = {
 DEFAULT_GST_RATE = 5.0
 
 
-class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries):
+class Database(CommerceQueries, ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries):
     def __init__(self, path: str = None):
         self.path = path or _default_db_path()
         self._init_schema()
@@ -151,6 +152,7 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
         self._ensure_offer_schema()
         self._ensure_exchange_schema()
         self._ensure_employee_schema()
+        self._ensure_commerce_schema()
 
     @contextmanager
     def _conn(self):
@@ -380,6 +382,7 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
         description="",
         expense_date=None,
         employee_id=None,
+        godown_id=1,
     ):
         category = category.strip()
 
@@ -402,6 +405,7 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
 
         with self._conn() as conn:
             conn.execute('BEGIN IMMEDIATE')
+            self._location(conn, godown_id)
             if employee_id is not None:
                 self._require_employee(conn,employee_id,active=True)
             cur = conn.execute(
@@ -428,6 +432,7 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
                 ),
             )
 
+            conn.execute('UPDATE expenses SET godown_id=? WHERE id=?', (godown_id, cur.lastrowid))
             return cur.lastrowid
 
     def get_expenses(self, date_from=None, date_to=None):
@@ -1091,6 +1096,7 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
                     stock_qty,
                 ),
             )
+            self._catalog_stock(conn, cur.lastrowid, stock_qty)
             return cur.lastrowid
 
     def update_item(
@@ -1128,16 +1134,16 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
                 ),
             )
 
+            self._catalog_stock(conn, item_id, stock_qty)
+
     def delete_item(self, item_id):
         with self._conn() as conn:
             conn.execute("UPDATE items SET active=0 WHERE id=?", (item_id,))
 
     def adjust_stock(self, item_id, delta):
         with self._conn() as conn:
-            conn.execute(
-                "UPDATE items SET stock_qty = stock_qty + ? WHERE id=?",
-                (delta, item_id),
-            )
+            conn.execute('BEGIN IMMEDIATE')
+            self._stock_delta(conn, item_id, 1, delta, None, 'Inventory adjustment')
 
     # ---------------------------------------------------------- customers
     def search_customers(self, text=""):
@@ -1297,6 +1303,8 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
         payment_notes="",
         employee_pricing=False,
         customer_details=None,
+        godown_id=1,
+        sale_channel="Retail",
     ):
         """
         Save a bill and optional customer details as one atomic transaction.
@@ -1361,6 +1369,11 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
 
         with self._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            self._location(conn, godown_id)
+            if sale_channel not in ('Retail', 'Wholesale'):
+                raise ValueError('Choose Retail or Wholesale.')
+            if employee_pricing and (godown_id != 1 or sale_channel != 'Retail'):
+                raise ValueError('Only admins can change the sale channel or godown.')
 
             if employee_pricing or any(i.get('offer_checked') or i.get('offer_id_snapshot') for i in items):
                 self._validate_offer_bill(conn, locals())
@@ -1420,12 +1433,14 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
             )
 
             bill_id = cur.lastrowid
+            conn.execute('UPDATE bills SET godown_id=?,sale_channel=? WHERE id=?', (godown_id, sale_channel, bill_id))
 
             for it in items:
                 quantity = it["quantity"]
 
-                if quantity <= 0:
+                if isinstance(quantity, bool) or int(quantity) != quantity or quantity <= 0:
                     raise ValueError(f"Invalid quantity for item: {it['name']}")
+                quantity = int(quantity)
 
                 line_gst_rate = float(it.get("gst_rate", gst_rate or 0.0))
                 line_gst_amount = money(it.get("gst_amount", 0.0))
@@ -1437,11 +1452,12 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
                     raise ValueError("GST amount cannot be negative.")
 
                 stock_deducted = 0
+                cost_cents = None
                 if it.get("item_id"):
                     stock = conn.execute("SELECT stock_qty FROM items WHERE id=?", (it["item_id"],)).fetchone()
                     if stock is None:
                         raise ValueError("Item no longer exists. Refresh the catalog and try again.")
-                    stock_deducted = min(quantity, max(stock["stock_qty"], 0))
+                    stock_deducted, cost_cents = self._stock_out(conn, it['item_id'], godown_id, quantity, bill_no, bill_date)
 
                 conn.execute(
                     """
@@ -1456,11 +1472,12 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
                         gst_rate,
                         gst_amount,
                         stock_deducted,
+                        cost_cents,
                         offer_id_snapshot,
                         offer_name_snapshot,
                         offer_discount
                     )
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     """,
                     (
                         bill_id,
@@ -1473,27 +1490,12 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
                         line_gst_rate,
                         line_gst_amount,
                         stock_deducted,
+                        cost_cents,
                         it.get('offer_id_snapshot'),
                         it.get('offer_name_snapshot'),
                         money(it.get('offer_discount', 0)),
                     ),
                 )
-
-                # IMPORTANT:
-                # We deliberately do NOT block a bill because of
-                # recorded stock quantity.
-                if it.get("item_id"):
-                    conn.execute(
-                        """
-                        UPDATE items
-                        SET stock_qty = MAX(stock_qty - ?, 0)
-                        WHERE id = ?
-                        """,
-                        (
-                            quantity,
-                            it["item_id"],
-                        ),
-                    )
 
             # Save the first payment in the same transaction as the bill.
             # A zero payment is valid for a fully-credit sale, so simply
@@ -1527,10 +1529,11 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
         with self._conn() as conn:
             bill = conn.execute(
                 """SELECT bills.*, customers.name AS customer_name, customers.phone AS customer_phone,
-                          original.bill_no AS exchange_from_no, e.returned_cents AS exchange_returned_cents,
+                          g.name AS godown_name, original.bill_no AS exchange_from_no, e.returned_cents AS exchange_returned_cents,
                           e.replacement_cents AS exchange_replacement_cents,
                           (SELECT COALESCE(sum_money_cents(amount), 0)/100.0 FROM payments WHERE bill_id=bills.id) AS paid_amount
                    FROM bills LEFT JOIN customers ON customers.id = bills.customer_id
+                   LEFT JOIN godowns g ON g.id=bills.godown_id
                    LEFT JOIN exchanges e ON e.exchange_bill_id=bills.id
                    LEFT JOIN bills original ON original.id=e.source_bill_id
                    WHERE bills.id=?""",
@@ -1554,15 +1557,14 @@ class Database(ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries)
             if conn.execute('SELECT 1 FROM exchanges WHERE source_bill_id=? OR exchange_bill_id=? LIMIT 1',
                             (bill_id,bill_id)).fetchone():
                 raise ValueError('Bills linked to exchanges cannot be deleted; their stock and payment history must remain intact.')
+            bill = conn.execute('SELECT godown_id,bill_no FROM bills WHERE id=?', (bill_id,)).fetchone()
             items = conn.execute(
-                "SELECT item_id, COALESCE(stock_deducted, quantity) AS stock_deducted FROM bill_items WHERE bill_id=?", (bill_id,)
+                "SELECT item_id, cost_cents, COALESCE(stock_deducted, quantity) AS stock_deducted FROM bill_items WHERE bill_id=?", (bill_id,)
             ).fetchall()
             for it in items:
                 if it["item_id"]:
-                    conn.execute(
-                        "UPDATE items SET stock_qty = stock_qty + ? WHERE id=?",
-                        (it["stock_deducted"], it["item_id"]),
-                    )
+                    self._stock_delta(conn, it['item_id'], bill['godown_id'], it['stock_deducted'],
+                                      it['cost_cents'], 'Deleted '+bill['bill_no'])
             conn.execute("DELETE FROM bills WHERE id=?", (bill_id,))
 
     def search_bills(self, date_from=None, date_to=None, search_text=None):

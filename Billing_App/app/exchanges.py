@@ -175,19 +175,24 @@ class ExchangeQueries:
                 VALUES (?,?,?,?,?,?,?,?,?,?,?)''',(bill_no,quote['source']['customer_id'],day,subtotal/100,
                 discount/subtotal*100 if subtotal>0 else 0,discount/100,difference/100,payment_mode,
                 (net-quote['net_cents'])/100,rate,total_gst/100)).lastrowid
+            godown_id = quote['source']['godown_id']
+            conn.execute('UPDATE bills SET godown_id=?,sale_channel=? WHERE id=?',
+                         (godown_id, quote['source']['sale_channel'], bill_id))
             exchange_id = conn.execute('''INSERT INTO exchanges(source_bill_id,exchange_bill_id,request_key,
                 request_hash,returned_cents,replacement_cents,exchange_date) VALUES (?,?,?,?,?,?,?)''',
                 (source_bill_id,bill_id,request_key,fingerprint,quote['credit_cents'],replacement,day)).lastrowid
             # Restock first: a same-product exchange can use the pieces brought back.
             for row in quote['lines']:
                 qty = row['return_qty']
+                source_cost = row.get('cost_cents')
+                cost = (source_cost * (row['returned_qty'] + qty) // row['quantity'] - source_cost * row['returned_qty'] // row['quantity']) if source_cost is not None else None
                 if row['item_id']:
-                    conn.execute('UPDATE items SET stock_qty=stock_qty+? WHERE id=?',(qty,row['item_id']))
+                    self._stock_delta(conn, row['item_id'], godown_id, qty, cost, 'Return '+bill_no, day)
                 conn.execute('''INSERT INTO bill_items(bill_id,item_id,item_name_snapshot,category_snapshot,
-                    quantity,rate,subtotal,gst_rate,gst_amount,stock_deducted) VALUES (?,?,?,?,?,?,?,?,?,?)''',
+                    quantity,rate,subtotal,gst_rate,gst_amount,stock_deducted,cost_cents) VALUES (?,?,?,?,?,?,?,?,?,?,?)''',
                     (bill_id,row['item_id'],row['item_name_snapshot'],row['category_snapshot'],-qty,
                      row['rate'],-row['return_net']/100,row['gst_rate'],-row['return_tax']/100,
-                     -qty if row['item_id'] else 0))
+                     -qty if row['item_id'] else 0, -cost if cost is not None else None))
                 conn.execute('''INSERT INTO exchange_returns(exchange_id,source_line_id,quantity,net_cents,gst_cents)
                     VALUES (?,?,?,?,?)''',(exchange_id,row['id'],qty,row['return_net'],row['return_tax']))
             for item in items:
@@ -196,15 +201,13 @@ class ExchangeQueries:
                     stock = conn.execute('SELECT stock_qty FROM items WHERE id=?',(item['item_id'],)).fetchone()
                     if stock is None:
                         raise ValueError('A replacement item no longer exists. Reload the catalog.')
-                deducted = min(item['quantity'],max(stock['stock_qty'],0)) if stock else 0
+                deducted, cost = self._stock_out(conn, item['item_id'], godown_id, item['quantity'], bill_no, day) if stock else (0, None)
                 conn.execute('''INSERT INTO bill_items(bill_id,item_id,item_name_snapshot,category_snapshot,
-                    quantity,rate,subtotal,gst_rate,gst_amount,stock_deducted,
-                    offer_id_snapshot,offer_name_snapshot,offer_discount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+                    quantity,rate,subtotal,gst_rate,gst_amount,stock_deducted,cost_cents,
+                    offer_id_snapshot,offer_name_snapshot,offer_discount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
                     (bill_id,item.get('item_id'),item['name'],item.get('category',''),item['quantity'],
                      money(item['rate']),money(item['subtotal']),float(item.get('gst_rate',0)),money(item.get('gst_amount',0)),
-                     deducted,item.get('offer_id_snapshot'),item.get('offer_name_snapshot'),money(item.get('offer_discount',0))))
-                if stock:
-                    conn.execute('UPDATE items SET stock_qty=MAX(stock_qty-?,0) WHERE id=?',(item['quantity'],item['item_id']))
+                     deducted,cost,item.get('offer_id_snapshot'),item.get('offer_name_snapshot'),money(item.get('offer_discount',0))))
             conn.execute('''INSERT INTO payments(bill_id,customer_id,payment_date,amount,payment_mode,notes)
                 VALUES (?,?,?,?,?,?)''',(bill_id,quote['source']['customer_id'],day,difference/100,payment_mode,
                                        'Exchange difference from '+quote['source']['bill_no']))

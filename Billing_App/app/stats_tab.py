@@ -214,7 +214,7 @@ class StatsTab(QWidget):
         cards = [
             ('Total Revenue', rupees(totals['revenue']), 'GST included'),
             ('Total Expenses', rupees(totals['expenses']), 'Expense dates in period'),
-            ('Net Profit', rupees(totals['net_profit']), 'Revenue − recorded expenses'),
+            ('Sales less expenses', rupees(totals['net_profit']), 'For cost-based profit, open Chart of Accounts → Reports'),
             ('Payments Collected', rupees(totals['payments_collected']), 'Payment dates in period'),
             ('Outstanding Credit', rupees(totals['outstanding']), 'Selected bills, balance to date'),
             ('Total Bills', str(totals['bill_count']), 'Bill dates in period'),

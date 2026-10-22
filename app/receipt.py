@@ -814,6 +814,7 @@ table {{
 <body>
 
 <div class="invoice">
+    <div>{escape(str(_value(bill_row, 'sale_channel', 'Retail')))} sale · {escape(str(_value(bill_row, 'godown_name', 'Default shop')))}</div>
 
     <table class="header-table">
         <tr>
@@ -1156,7 +1157,7 @@ class PrinterDialog(QDialog):
 
 
 class ReceiptDialog(QDialog):
-    def __init__(self, bill_row, bill_items, parent=None):
+    def __init__(self, bill_row, bill_items, parent=None, html=None):
         super().__init__(parent)
 
         self.setWindowTitle(
@@ -1179,7 +1180,7 @@ class ReceiptDialog(QDialog):
         # Register the bill-specific UPI QR as a document resource so it
         # prints correctly in both the A4 printer output and saved PDF.
         paid_amount = _paid_amount(bill_row)
-        if paid_amount > 0:
+        if paid_amount > 0 and html is None:
             qr_image = _make_payment_qr_image(bill_row, paid_amount)
             if not qr_image.isNull():
                 document.addResource(
@@ -1189,7 +1190,7 @@ class ReceiptDialog(QDialog):
                 )
 
         document.setHtml(
-            build_receipt_html(bill_row, bill_items)
+            html if html is not None else build_receipt_html(bill_row, bill_items)
         )
 
         # Force the preview to be a real A4 page.

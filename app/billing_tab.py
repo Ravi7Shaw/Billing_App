@@ -63,9 +63,11 @@ class BillingTab(QWidget):
         self._apply_permissions()
         self._refresh_categories()
         self._refresh_phone_completer()
+        self._refresh_sale_location()
 
     def _apply_permissions(self):
         admin = self.session.is_admin
+        self.sale_options.setVisible(admin)
         self.discount_arrow_btn.setVisible(admin)
         self.payment_amount_input.setEnabled(admin)
         self.rate_input.setReadOnly(not admin)
@@ -99,6 +101,16 @@ class BillingTab(QWidget):
         left = QVBoxLayout(entry)
         left.setContentsMargins(0, 0, 0, 0)
         left.setSpacing(6)
+        self.sale_options = QWidget()
+        sale_form = QFormLayout(self.sale_options)
+        sale_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        self.sale_godown = QComboBox()
+        self.sale_godown.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.sale_channel = QComboBox()
+        self.sale_channel.addItems(['Retail', 'Wholesale'])
+        sale_form.addRow('Selling godown', self.sale_godown)
+        sale_form.addRow('Sale type', self.sale_channel)
+        left.addWidget(self.sale_options)
         left.addWidget(self._build_customer_box())
         left.addWidget(self._build_item_entry_box())
         left.addStretch()
@@ -422,8 +434,20 @@ class BillingTab(QWidget):
         self.phone_input.setText(phone)
         self._lookup_customer()
 
+    def _refresh_sale_location(self):
+        if not self.session.is_admin:
+            return
+        current = self.sale_godown.currentData()
+        self.sale_godown.clear()
+        for row in self.db.get_godowns():
+            self.sale_godown.addItem(row['name'], row['id'])
+        index = self.sale_godown.findData(current)
+        if index >= 0:
+            self.sale_godown.setCurrentIndex(index)
+
     def refresh_catalog(self):
         """Call after inventory changes elsewhere so combos/suggestions are current."""
+        self._refresh_sale_location()
         self._refresh_categories()
         self._refresh_phone_completer()
 
@@ -955,6 +979,8 @@ class BillingTab(QWidget):
                 paid_now,
                 "Initial payment",
                 customer_details=customer_details,
+                godown_id=(self.sale_godown.currentData() or 1) if self.session.is_admin else 1,
+                sale_channel=self.sale_channel.currentText() if self.session.is_admin else 'Retail',
             )
         except Exception as exc:
             QMessageBox.critical(self, "Could not save bill", str(exc))

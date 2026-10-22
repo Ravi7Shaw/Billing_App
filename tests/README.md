@@ -136,3 +136,23 @@ helper startup and staging/replacement failures. `test_windows_setup.py` checks
 that staging leaves the installed executable intact. Windows process waiting,
 actual executable rebuilding/replacement/relaunch and printer drivers require
 a native Windows check; these platform-independent tests do not establish that.
+
+## Purchases and accounting
+
+`test_commerce.py` covers GST/no-GST purchases, ₹50,000/₹25,000 partial payment,
+unit conversion and snapshots, transaction rollback, duplicate supplier invoices,
+weighted costs, sale deletion/exchange reversals, per-godown stock/expenses,
+advances without duplicate cash, balanced journals, unknown historical costs,
+repeatable migrations, role checks, real purchase-form submission, PDF and backup.
+The existing legacy migration, sales, offers, reporting and access suites also
+cover the shared database paths.
+
+Run the new screen geometry probe for either copy:
+
+```bash
+QT_QPA_PLATFORM=offscreen python tests/commerce_layout_probe.py app
+QT_QPA_PLATFORM=offscreen python tests/commerce_layout_probe.py Billing_App/app
+```
+
+It checks all new sections with the production stylesheet from 640×480 through
+1920×1080, including visibility of purchase Save/Clear actions.
