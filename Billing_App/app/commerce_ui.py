@@ -308,10 +308,14 @@ class ChartAccountsTab(QWidget):
         layout=QVBoxLayout(self)
         nav=QHBoxLayout();layout.addLayout(nav)
         self.section=combo([(s,i) for i,s in enumerate(('Account master','Inventory master','Godowns','Reports'))])
-        nav.addWidget(self.section,1);button('New purchase',lambda:on_purchase() if on_purchase else None,nav)
+        nav.addWidget(self.section,1)
+        self.scope=combo();nav.addWidget(self.scope,1)
+        button('New purchase',lambda:on_purchase() if on_purchase else None,nav)
+        self.scope.setToolTip('Live existing shop data: Primary shows all godowns. Choose a shop for its own stock, ledger entries and reports.')
         self.pages=QTabWidget();self.pages.tabBar().hide();layout.addWidget(self.pages,1)
         self.section.currentIndexChanged.connect(self.pages.setCurrentIndex)
         self._accounts();self._inventory();self._godowns();self._reports()
+        self.scope.currentIndexChanged.connect(lambda:self._guard(self.refresh))
         self.refresh()
 
     def _guard(self,action):
@@ -342,9 +346,11 @@ class ChartAccountsTab(QWidget):
     def _statement(self):
         if not hasattr(self,'statement_table'):return
         start,end=self.account_period.bounds()
-        data=self.db.account_statement(self.ledger.currentData(),start or '0001-01-01',end or '9999-12-31')
+        data=self.db.account_statement(self.ledger.currentData(),start or '0001-01-01',end or '9999-12-31',self.scope.currentData())
         self.ledger_summary.setText(f"Opening Rs. {amount(data['opening_cents'])} | Closing Rs. {amount(data['balance_cents'])} (positive = debit, negative = credit)")
-        populate(self.statement_table,[(r['date'],r['reference'],r['debit_name'],r['credit_name'],amount(r['amount_cents']),amount(r['balance_cents']),r['notes']) for r in data['rows']])
+        if self.ledger.currentData() is None:
+            self.ledger_summary.setText(f"{len(data['rows'])} journal postings from existing sales, purchases, payments, expenses and vouchers. Select a ledger for its running balance.")
+        populate(self.statement_table,[(r['date'],r['reference'],r['debit_name'],r['credit_name'],amount(r['amount_cents']),amount(r['balance_cents']) if self.ledger.currentData() else '',r['notes']) for r in data['rows']])
 
     def _ledger(self,edit=False):
         record=None
@@ -421,7 +427,7 @@ class ChartAccountsTab(QWidget):
         button('Units',lambda:self._master('Unit'),controls)
         button('Stock categories',self._category,controls)
         button('Add item',self._new_item,controls)
-        self.stock_table=table(['ID','Stock item','Category','Stock group','Specification','Unit','Pieces/unit','Total pieces','Stock cost'])
+        self.stock_table=table(['ID','Stock item','Category','Brand / style','Stock group','Specification','Unit','Pieces/unit','Total pieces','Stock cost'])
         layout.addWidget(self.stock_table,1)
         actions=QHBoxLayout();layout.addLayout(actions)
         button('Configure selected item',self._configure_item,actions)
@@ -463,14 +469,13 @@ class ChartAccountsTab(QWidget):
     def _godowns(self):
         page=QWidget();layout=QVBoxLayout(page)
         controls=QHBoxLayout();layout.addLayout(controls)
-        self.stock_location=combo();controls.addWidget(self.stock_location,1)
-        self.stock_location.currentIndexChanged.connect(lambda:self._guard(self._stock))
+        self.stock_location=self.scope
         button('Manage godowns',lambda:self._master('Godown'),controls)
         actions=QHBoxLayout();layout.addLayout(actions)
         button('Transfer stock',self._transfer,actions);button('Opening stock / cost',self._opening,actions)
         self.godown_table=table(['Item','Category','Pieces','Value (Rs.)'])
         layout.addWidget(self.godown_table,1)
-        note('Main Godown totals all shops. Default shop holds migrated stock and employee sales. Opening costs must be entered before the first transaction for that item and shop. Unknown historical costs stay marked Unknown.',layout)
+        note('Primary totals all shops. Default shop is the location holding existing stock and employee sales. Opening costs must be entered before the first transaction for that item and shop. Unknown historical costs stay marked Unknown.',layout)
         self.pages.addTab(page,'Godowns')
 
     def _stock(self):
@@ -490,10 +495,10 @@ class ChartAccountsTab(QWidget):
 
     def _reports(self):
         page=QWidget();layout=QVBoxLayout(page)
-        self.period=PeriodFilter();layout.addWidget(self.period)
+        self.period=PeriodFilter('All time');layout.addWidget(self.period)
         controls=QHBoxLayout();layout.addLayout(controls)
-        self.report_location=combo();self.channel=combo([('All sales',None),('Retail','Retail'),('Wholesale','Wholesale')])
-        controls.addWidget(self.report_location,1);controls.addWidget(self.channel,1)
+        self.report_location=self.scope;self.channel=combo([('All sales',None),('Retail','Retail'),('Wholesale','Wholesale')])
+        controls.addWidget(self.channel,1)
         self.report_pages=QTabWidget();layout.addWidget(self.report_pages,1)
         self.summary_table=table(['Metric','Amount / count'])
         self.summary_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
@@ -508,7 +513,7 @@ class ChartAccountsTab(QWidget):
         button('Export current report',lambda:self._export(self.report_pages.currentWidget(),'report'),controls)
         button('Open purchase receipt',self._report_receipt,controls)
         note('Profit excludes GST and deducts item costs and expenses. Unknown costs are flagged. Backdated entries do not revise earlier sale costs. The channel filter applies to sales; paid and balance figures include all payments to date.',layout)
-        for signal in (self.period.changed,self.report_location.currentIndexChanged,self.channel.currentIndexChanged):signal.connect(lambda:self._guard(self._report))
+        for signal in (self.period.changed,self.channel.currentIndexChanged):signal.connect(lambda:self._guard(self._report))
         self.pages.addTab(page,'Reports')
 
     def _report(self):
@@ -538,7 +543,7 @@ class ChartAccountsTab(QWidget):
 
     def refresh(self):
         fill(self.ledger,[('All journal entries',None)]+[(r['name']+' / '+r['group'],r['key']) for r in self.db.get_account_ledgers()])
-        locations=[('Main Godown — all shops',None)]+[(r['name'],r['id']) for r in self.db.get_godowns()]
-        fill(self.stock_location,locations);fill(self.report_location,locations)
-        populate(self.stock_table,[(r['id'],r['name'],r['category'],r['stock_group'],r['specification'],r['unit'],r['unit_pieces'],r['quantity'],amount(r['value_cents'])) for r in self.db.stock_report()])
+        locations=[('Primary — all godowns',None)]+[(r['name'],r['id']) for r in self.db.get_godowns()]
+        fill(self.scope,locations)
+        populate(self.stock_table,[(r['id'],r['name'],r['category'],r['brand'],r['stock_group'],r['specification'],r['unit'],r['unit_pieces'],r['quantity'],amount(r['value_cents'])) for r in self.db.stock_report(self.scope.currentData())])
         self._statement();self._stock();self._report()

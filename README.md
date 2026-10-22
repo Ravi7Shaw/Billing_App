@@ -410,3 +410,134 @@ prior recorded costs and avoid inventing historical valuations.
 
 The older Statistics card previously called Net Profit is labelled **Sales less
 expenses**; use Chart of Accounts for the cost-based profit calculation.
+
+## Barcode Labels — Linux and Windows
+
+**Admin → Barcode Labels** provides a label designer and stock-linked print
+batches in both app copies. Install the updated requirements before running from
+source; Windows setup/update also installs the new `python-barcode` dependency.
+The Citizen CL-S621II photo is the target device; the app uses the installed OS
+printer driver rather than sending printer-language commands directly.
+
+### Design and metadata
+
+- Width and height are **user-entered millimetres**, initially **100 × 50 mm**.
+  Choose **Design label** for a live white-paper preview with a shadow. It fits
+  the screen without changing physical print size. The preview uses selected
+  printer-dot geometry, including X/Y correction offsets.
+- Select an existing catalog item or create a new one with category, brand/style,
+  size, colour, selling price and barcode. Categories/brands can be added from
+  this screen; they are the same masters used by Inventory and billing.
+- Add and drag text, Code 128, QR, rectangles, lines and logo images. Drag the
+  selected element's lower-right handle to resize, or enter exact X/Y/width/height
+  in millimetres under **Selected element properties**. Rotate, align, duplicate,
+  delete, reorder layers, undo or redo. Click **Apply properties** after editing.
+- Font selection includes every font installed on the current computer, with
+  point size, bold, italic, underline and colour controls. Install the same fonts
+  on Linux and Windows for matching typography. Thermal printers print in their
+  supported monochrome mode; decorative colour depends on the printer driver.
+- Text and barcode content bind to fields such as `{name}`, `{category}`,
+  `{brand}`, `{style}`, `{size}`, `{color}`, `{rate}`, `{godown}` and `{barcode}`.
+  Additional metadata accepts `field=value`, one field per line. Use `{{` and `}}`
+  to print literal braces. The expanded values are frozen in the saved batch.
+- `{metadata}` is a JSON **string containing all catalog and custom metadata**.
+  Use the **QR — full metadata string** starting layout to encode it directly.
+  Code 128 is available for compact ASCII strings, including a catalog SKU or
+  short custom field combination. Long data cannot be made readable by shrinking
+  bars indefinitely: enlarge the barcode or use QR. QR requires a 2D scanner;
+  both barcode types resolve to the same existing catalog item in New Bill.
+- Templates save in the shop database (included in Backup), or import/export as
+  JSON with embedded logos. Physical dimensions, elements, fonts, DPI and printer
+  correction offsets are saved. Starting layouts and imported templates replace
+  the current design; Undo restores the previous design.
+
+### Printer setup and accuracy
+
+1. **Windows:** install the printer's Windows driver and add it under Printers &
+   scanners. **Linux:** configure the printer through CUPS / Print Settings with
+   a driver that supports its custom label size. The printer must appear in the
+   app's printer selector. The desktop, template and stock code is shared across
+   both OSes; the updater/build helper remains specifically for Windows `.exe`.
+2. Set the actual roll width/height and gap or black-mark media mode in the driver.
+   Match the app's DPI to the device/driver; **203 DPI** is the starting setting,
+   with 300/600 options for other compatible printers. Enter the actual label
+   width/height in the app; these are not fixed to 100 × 50 mm.
+3. Use **Calibration** to print a 20 × 20 mm reference square. Measure it. If its
+   size is wrong, fix driver scaling/media configuration; do not compensate with
+   offsets. Use X/Y offsets only to correct placement. Calibrate the printer's
+   media/gap sensor according to its manual if feeding is wrong.
+4. The application requests the entered custom paper size, zero application
+   margins, full-page drawing, one driver copy and **100% scale**. Requested
+   label count is emitted as separate pages. It rejects a driver-reported paper
+   size mismatch, elements outside the paper, clipped text, obscured symbols,
+   and barcodes whose narrow modules would be under two device dots. Barcode/QR
+   rotations use 90-degree steps, with quiet zones preserved.
+5. **PDF preview** saves one actual-size label and never changes stock. When
+   printing a PDF externally, select actual size / 100%, not fit-to-page.
+   PDF page dimensions are quantized to points; tests allow 0.3 mm rounding.
+
+Physical alignment, media feeding and paper output still depend on the installed
+driver, calibration and hardware. Automated tests verify encoding, rendering,
+page size and the print workflow; they cannot certify a particular printer's
+physical output. A missing printer produces an actionable dialog, not a silent
+print button.
+
+### Quantity, confirmations and stock
+
+- Choose the receiving **godown** and the number of labels. **Add new stock and
+  print** adds that many **pieces** after successful submission to the OS printer.
+  Optional purchase cost per piece provides stock valuation; unknown costs remain
+  unknown. This is stock introduced directly, with known value balanced against
+  equity in accounts. Use Purchases for supplier debt/payment accounting.
+- **Reprint labels — no stock change** is the default for existing items. Labels
+  for purchases already received should use reprint mode, avoiding a second stock
+  addition. A new item requires Add new stock mode.
+- Two separate confirmations show printer, dimensions, DPI, **label count**,
+  selling price, receiving godown, stock increase, cost and correction offsets.
+  Cancelling either confirmation creates no batch and adds no stock.
+- Each job has a durable `L-` batch reference and an immutable design/data snapshot.
+  Stock posts once, atomically. **Print history → Reprint saved batch** uses the
+  original label and a user-entered replacement-label count, adding no stock even
+  if the catalog price has since changed.
+- Printer submission is not proof of paper output. A jam/error or interruption
+  leaves a job **uncertain/sending**, with no automatic retry. Check the printer
+  and queue, then either confirm that all labels printed (post the recorded stock
+  once), or cancel the unresolved batch with no stock change. Resolve an earlier
+  new-stock job before starting another for that item/godown. For partial output,
+  cancel queued pages and reconcile the actual pieces manually before reprinting
+  only the missing labels. Submitted stock is never silently reversed on reprint.
+
+### Connected accounting and primary view
+
+Chart of Accounts now opens reports on **All time**, so existing historical
+sales/expenses are visible immediately. Its top godown selector is shared across
+Account master statements, Inventory master quantities, Godowns and Reports.
+**Primary — all godowns** is the default combined view; actual shops retain their
+own quantities, stock movements and transactions. It is not an extra stock
+location and does not double-count the other shops. **Default shop** remains the
+real location for previously unallocated stock, older sales and employee sales.
+Catalog definitions (category/brand/item) are shared; per-shop inventory lists only
+items allocated to that shop. Known-value label stock additions also appear in
+accounts. A compact section chooser makes all admin tabs reachable on small screens.
+
+### Run from Python
+
+Windows, from the repository root:
+
+```bat
+py -m venv .venv
+.venv\Scripts\python.exe -m pip install -r app\requirements.txt
+.venv\Scripts\python.exe app\main.py
+```
+
+Linux, from the repository root:
+
+```bash
+python3 -m venv .venv
+.venv/bin/python -m pip install -r app/requirements.txt
+.venv/bin/python app/main.py
+```
+
+Linux needs a graphical desktop with Qt's system libraries and a configured CUPS
+printer for physical printing. Both source copies use the same user-profile shop
+database; take a Backup before testing with real shop data.

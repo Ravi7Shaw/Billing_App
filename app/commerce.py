@@ -229,16 +229,18 @@ class CommerceQueries:
 
     def stock_report(self,godown_id=None):
         with self._conn() as c:
-            return [dict(r) for r in c.execute("""SELECT i.id,i.name,c.name AS category,g.name AS stock_group,
+            return [dict(r) for r in c.execute("""SELECT i.id,i.name,c.name AS category,st.name AS brand,g.name AS stock_group,
                 g.specification,u.name AS unit,u.pieces AS unit_pieces,
                 COALESCE(SUM(s.quantity),0) AS quantity,
                 CASE WHEN SUM(CASE WHEN s.quantity>0 AND s.value_cents IS NULL THEN 1 ELSE 0 END)>0 THEN NULL
                      ELSE COALESCE(SUM(s.value_cents),0) END AS value_cents
                 FROM items i JOIN categories c ON c.id=i.category_id
+                LEFT JOIN subtypes st ON st.id=i.subtype_id
                 LEFT JOIN stock_meta m ON m.item_id=i.id LEFT JOIN stock_groups g ON g.id=m.group_id
                 LEFT JOIN stock_units u ON u.id=COALESCE(m.unit_id,1)
                 LEFT JOIN godown_stock s ON s.item_id=i.id AND (? IS NULL OR s.godown_id=?)
-                WHERE i.active=1 GROUP BY i.id ORDER BY c.name,i.name""",(godown_id,godown_id))]
+                WHERE i.active=1 AND (? IS NULL OR EXISTS(SELECT 1 FROM godown_stock local WHERE local.item_id=i.id AND local.godown_id=?))
+                GROUP BY i.id ORDER BY c.name,i.name""",(godown_id,godown_id,godown_id,godown_id))]
 
     def quote_purchase(self,lines,gst_enabled):
         if not lines:
@@ -391,6 +393,8 @@ class CommerceQueries:
                 debit,credit,amount=credit,debit,-amount
             if amount:
                 entries.append(dict(date=when[:10],reference=ref,debit=debit,credit=credit,amount_cents=amount,godown_id=location,notes=notes))
+        for r in c.execute("SELECT * FROM stock_movements WHERE reference LIKE 'Label batch L-%' AND value_cents IS NOT NULL"):
+            post(r['movement_date'],r['reference'],'inventory','equity',r['value_cents'],r['godown_id'],'Stock introduced with labels')
         for r in c.execute('SELECT * FROM opening_stock_values'):
             post(r['entry_date'],'Opening stock '+str(r['item_id']),'inventory','equity',r['value_cents'],r['godown_id'])
         for r in c.execute('SELECT * FROM bills'):

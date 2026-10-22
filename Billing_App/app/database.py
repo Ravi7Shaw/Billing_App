@@ -29,6 +29,7 @@ from offers import OfferQueries
 from exchanges import ExchangeQueries
 from employees import EmployeeQueries
 from commerce import CommerceQueries
+from labels import LabelQueries
 
 DB_FILENAME = "cloth_shop.db"
 
@@ -143,7 +144,7 @@ STARTER_SUBTYPES = {
 DEFAULT_GST_RATE = 5.0
 
 
-class Database(CommerceQueries, ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries):
+class Database(LabelQueries, CommerceQueries, ReportingQueries, OfferQueries, ExchangeQueries, EmployeeQueries):
     def __init__(self, path: str = None):
         self.path = path or _default_db_path()
         self._init_schema()
@@ -153,6 +154,7 @@ class Database(CommerceQueries, ReportingQueries, OfferQueries, ExchangeQueries,
         self._ensure_exchange_schema()
         self._ensure_employee_schema()
         self._ensure_commerce_schema()
+        self._ensure_label_schema()
 
     @contextmanager
     def _conn(self):
@@ -1012,8 +1014,8 @@ class Database(CommerceQueries, ReportingQueries, OfferQueries, ExchangeQueries,
                           subtypes.name AS subtype_name
                    FROM items JOIN categories ON categories.id = items.category_id
                    LEFT JOIN subtypes ON subtypes.id = items.subtype_id
-                   WHERE items.barcode=? AND items.active=1""",
-                (barcode.strip(),),
+                   WHERE items.active=1 AND items.id IN (SELECT id FROM items WHERE barcode=? UNION SELECT item_id FROM barcode_aliases WHERE code=?)""",
+                (barcode.strip(), barcode.strip()),
             ).fetchone()
 
     def get_item_by_id(self, item_id: int):
@@ -1079,6 +1081,7 @@ class Database(CommerceQueries, ReportingQueries, OfferQueries, ExchangeQueries,
     ):
         with self._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            self._check_barcode_alias(conn, barcode, None)
             if not conn.execute("SELECT 1 FROM categories WHERE id=? AND active=1", (category_id,)).fetchone():
                 raise ValueError("Choose an active category. The previous category was removed.")
             cur = conn.execute(
@@ -1114,6 +1117,7 @@ class Database(CommerceQueries, ReportingQueries, OfferQueries, ExchangeQueries,
     ):
         with self._conn() as conn:
             conn.execute("BEGIN IMMEDIATE")
+            self._check_barcode_alias(conn, barcode, item_id)
             if not conn.execute("SELECT 1 FROM categories WHERE id=? AND active=1", (category_id,)).fetchone():
                 raise ValueError("Choose an active category. The previous category was removed.")
             conn.execute(

@@ -156,3 +156,33 @@ QT_QPA_PLATFORM=offscreen python tests/commerce_layout_probe.py Billing_App/app
 
 It checks all new sections with the production stylesheet from 640×480 through
 1920×1080, including visibility of purchase Save/Clear actions.
+
+## Barcode label verification
+
+Install independent decoder/PDF inspection tools in the test environment:
+
+```bash
+python -m pip install -r tests/requirements-labels.txt
+```
+
+`test_labels.py` covers Code128 and Unicode QR decoding at 203/300 DPI, custom
+75×35 mm PDF pages and exact page counts, clipped/obscured symbol rejection,
+metadata lookup in billing, alias collision rollback, twice-confirmed printing,
+cancellation, failed spool submission, durable stock posting and reprint
+idempotence, templates/calibration, permissions and existing accounting data.
+Without these test-only packages, only independent decode/PDF measurement tests
+are skipped; production requires python-barcode and existing qrcode/PySide6.
+
+Additional production-styled geometry probes:
+
+```bash
+QT_QPA_PLATFORM=offscreen python tests/label_layout_probe.py app
+QT_QPA_PLATFORM=offscreen python tests/label_layout_probe.py Billing_App/app
+```
+
+On Windows PowerShell set `$env:QT_QPA_PLATFORM='offscreen'` before the equivalent
+Python commands. Real release checks on both OSes require configuring a native
+printer, printing the calibration square and measuring paper output. Verify that
+cancelling either confirmation adds no stock and that reprinting a submitted
+batch adds no stock. Stop/cancel the OS print queue before reconciling a partial
+or interrupted job; automated tests never send paper jobs to a real printer.

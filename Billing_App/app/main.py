@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QInputDialog,
     QLineEdit,
+    QComboBox,
     QMessageBox,
 )
 from PySide6.QtGui import QIcon
@@ -29,6 +30,7 @@ from access import AccessSession, RoleDatabase
 from theme import STYLESHEET
 from billing_tab import BillingTab
 from commerce_ui import PurchasesTab, ChartAccountsTab
+from label_tab import LabelTab
 from inventory_tab import InventoryTab
 from customers_tab import CustomersTab
 from sales_tab import SalesTab
@@ -88,6 +90,19 @@ class MainWindow(QMainWindow):
             button.setProperty("compact", "true")
             access_bar.addWidget(button)
         self.tabs.setCornerWidget(controls, Qt.TopRightCorner)
+        self.section_picker = QComboBox()
+        self.section_picker.setMinimumWidth(140)
+        self.section_picker.setStyleSheet("QComboBox { min-height: 16px; padding: 4px 8px; }")
+        self.section_picker.setFixedHeight(30)
+        self.section_picker.setMaximumWidth(230)
+        self.section_picker.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.section_picker.setToolTip('Open any section')
+        self.section_picker.currentIndexChanged.connect(self.tabs.setCurrentIndex)
+        self.section_corner = QWidget()
+        section_layout = QHBoxLayout(self.section_corner)
+        section_layout.setContentsMargins(0, 2, 0, 2)
+        section_layout.addWidget(self.section_picker)
+        self.tabs.setCornerWidget(self.section_corner, Qt.TopLeftCorner)
 
         self.tabs.currentChanged.connect(self._on_tab_changed)
         self._build_dashboard()
@@ -100,7 +115,7 @@ class MainWindow(QMainWindow):
             self.tabs.removeTab(0)
             widget.hide()
             widget.deleteLater()
-        for name in ("inventory", "customers", "balances", "expenses", "sales", "stats", "status", "offers", "exchanges", "employees", "purchases", "accounts"):
+        for name in ("inventory", "customers", "balances", "expenses", "sales", "stats", "status", "offers", "exchanges", "employees", "purchases", "accounts", "labels"):
             setattr(self, name + "_tab", None)
         self.billing_tab = BillingTab(self.db, on_bill_saved=self._on_bill_saved)
         self.tabs.addTab(self.billing_tab, "New Bill")
@@ -109,6 +124,8 @@ class MainWindow(QMainWindow):
             self.purchases_tab = PurchasesTab(self.db, on_saved=self._on_catalog_changed)
             self.accounts_tab = ChartAccountsTab(self.db, on_changed=self._on_catalog_changed,
                 on_purchase=lambda: self.tabs.setCurrentWidget(self.purchases_tab))
+            self.labels_tab = LabelTab(self.db, on_changed=self._on_catalog_changed)
+            self.tabs.addTab(self.labels_tab, "Barcode Labels")
             self.tabs.addTab(self.purchases_tab, "Purchases")
             self.tabs.addTab(self.accounts_tab, "Chart of Accounts")
             self.customers_tab = CustomersTab(self.db, autoload=False)
@@ -135,10 +152,18 @@ class MainWindow(QMainWindow):
 
         for index in range(1, self.tabs.count()):
             widget = self.tabs.widget(index)
-            if widget not in (self.stats_tab, self.purchases_tab, self.accounts_tab):
+            if widget not in (self.stats_tab, self.purchases_tab, self.accounts_tab, self.labels_tab):
                 scroll_page(widget)
         self.tabs.setCurrentIndex(0)
         self.tabs.blockSignals(False)
+        self.section_picker.blockSignals(True)
+        self.section_picker.clear()
+        for index in range(self.tabs.count()):
+            self.section_picker.addItem(self.tabs.tabText(index))
+        self.section_picker.setCurrentIndex(0)
+        self.section_picker.blockSignals(False)
+        self.section_picker.setVisible(self.session.is_admin)
+        self.section_corner.setVisible(self.session.is_admin)
         admin = self.session.is_admin
         self.admin_button.setVisible(not admin)
         self.logout_button.setVisible(admin)
@@ -192,11 +217,14 @@ class MainWindow(QMainWindow):
         self._on_tab_changed(self.tabs.currentIndex())
 
     def _on_tab_changed(self, index):
+        self.section_picker.blockSignals(True)
+        self.section_picker.setCurrentIndex(index)
+        self.section_picker.blockSignals(False)
         if not self.session.is_admin:
             return
         widget = self.tabs.widget(index)
 
-        if widget in (self.purchases_tab, self.accounts_tab):
+        if widget in (self.purchases_tab, self.accounts_tab, self.labels_tab):
             widget.refresh()
         elif widget is self.sales_tab:
             self.sales_tab.refresh()
