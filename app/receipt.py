@@ -9,6 +9,10 @@ from html import escape
 from urllib.parse import urlencode
 
 from io import BytesIO
+import tempfile
+from pathlib import Path
+from printing import printing_backend, available_printers, printer_setup_help, printer_setup_hint, check_cups_queue, submit_pdf, queue_status
+from window_utils import fit_window
 
 from PySide6.QtWidgets import (
     QDialog,
@@ -18,10 +22,11 @@ from PySide6.QtWidgets import (
     QPushButton,
     QFileDialog,
     QMessageBox,
+    QLabel, QComboBox, QSpinBox, QFormLayout, QDialogButtonBox,
 )
-from PySide6.QtCore import QSizeF, QUrl, QByteArray, QBuffer, QIODevice
-from PySide6.QtGui import QTextDocument, QFont, QPageSize, QImage
-from PySide6.QtPrintSupport import QPrinter, QPrintDialog
+from PySide6.QtCore import QMarginsF, QSizeF, QUrl, QByteArray, QBuffer, QIODevice
+from PySide6.QtGui import QTextDocument, QFont, QPageSize, QPageLayout, QImage
+from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
 
 from widgets import rupees
 
@@ -54,10 +59,9 @@ SHOP_PHONE = "6360086532"
 # ============================================================
 # UPI PAYMENT QR
 # ============================================================
-# The QR uses a UPI VPA. For a PhonePe number-based VPA this is
-# commonly 9008080213@ybl, but verify the actual VPA on the
-# receiving PhonePe account and change this value if needed.
-UPI_ID = "9008080213@ybl"
+# Standard UPI payment QR for compatible apps such as PhonePe,
+# Google Pay and Paytm. The recorded payment amount is included in the URI.
+UPI_ID = "9148783935.ibz@icici"
 UPI_PAYEE_NAME = SHOP_NAME
 
 
@@ -215,8 +219,8 @@ def _paid_amount(bill_row):
     """
     Supports paid_amount/amount_paid if supplied by the database.
 
-    Until get_bill() exposes the payment aggregate, the fallback is
-    the bill total so the existing receipt flow keeps working.
+    get_bill() supplies the actual aggregate for saved bills. The fallback
+    supports legacy callers that supply their own receipt data.
     """
     total = _num(_value(bill_row, "total", 0))
 
@@ -244,7 +248,7 @@ def _balance_amount(bill_row):
 
 
 def _upi_payment_uri(bill_row, total):
-    """Build a standard UPI payment URI with the invoice amount."""
+    """Build a standard UPI payment URI with the supplied payment amount."""
     bill_no = str(_value(bill_row, "bill_no", "invoice") or "invoice")
     params = {
         "pa": UPI_ID,
@@ -266,7 +270,7 @@ def _make_payment_qr_image(bill_row, total):
         version=None,
         error_correction=qrcode.constants.ERROR_CORRECT_M,
         box_size=8,
-        border=3,
+        border=4,  # Standard four-module quiet zone for reliable scanning.
     )
     qr.add_data(payload)
     qr.make(fit=True)
@@ -323,12 +327,32 @@ def build_receipt_html(bill_row, bill_items):
 
     paid_amount = _paid_amount(bill_row)
     balance_amount = _balance_amount(bill_row)
+    # Use the recorded payment (Paid now on a new bill), not the invoice total.
+    # A fully credit sale has no payment to collect through a QR yet.
+    payment_qr_html = (
+        f'<img src="qr://invoice-payment" width="88" height="88">'
+        f'<div class="qr-title">SCAN TO PAY</div>'
+        f'<div class="qr-amount">{_money(paid_amount)}</div>'
+        f'<div class="qr-upi">{escape(UPI_ID)}</div>'
+        if paid_amount > 0 else '<div class="qr-title">No payment recorded</div>'
+    )
 
     # Intra-state Karnataka sale: 5% GST -> 2.5% CGST + 2.5% SGST.
     cgst_rate = gst_rate / 2 if gst_rate else 0.0
     sgst_rate = gst_rate / 2 if gst_rate else 0.0
     cgst_amount = gst_amount / 2 if gst_amount else 0.0
     sgst_amount = gst_amount / 2 if gst_amount else 0.0
+
+    is_exchange = bool(_value(bill_row, 'exchange_from_no', ''))
+    cgst_label = 'CGST adjustment' if is_exchange else f'CGST ({gst_rate / 2:g}%)'
+    sgst_label = 'SGST adjustment' if is_exchange else f'SGST ({gst_rate / 2:g}%)'
+    exchange_note = ''
+    if _value(bill_row, 'exchange_from_no', ''):
+        exchange_note = (f'<div class="amount-words"><b>Exchange against '
+                         f'{escape(str(_value(bill_row, "exchange_from_no", "")))}</b><br>'
+                         f'New purchases: {_money(_value(bill_row, "exchange_replacement_cents", 0)/100)} · '
+                         f'Returned value: {_money(_value(bill_row, "exchange_returned_cents", 0)/100)} · '
+                         f'Difference paid: {_money(total)}. No refund.</div>')
 
     item_rows = []
 
@@ -373,6 +397,12 @@ def build_receipt_html(bill_row, bill_items):
         line_sgst = line_gst_amount / 2
 
         description = escape(name)
+        if quantity < 0:
+            description += '<div class="item-category">Returned item — original paid value credited</div>'
+        offer_name = _value(item, 'offer_name_snapshot', '')
+        if offer_name:
+            description += (f'<div class="item-category">Offer: {escape(str(offer_name))}'
+                            f' — saved {_money(_value(item, "offer_discount", 0))}</div>')
 
         if category:
             description += (
@@ -786,6 +816,7 @@ table {{
 <body>
 
 <div class="invoice">
+    <div>{escape(str(_value(bill_row, 'sale_channel', 'Retail')))} sale · {escape(str(_value(bill_row, 'godown_name', 'Default shop')))}</div>
 
     <table class="header-table">
         <tr>
@@ -924,11 +955,11 @@ table {{
                         <td class="summary-value">{_money(discount_amount)}</td>
                     </tr>
                     <tr>
-                        <td class="summary-label">CGST ({gst_rate / 2:g}%)</td>
+                        <td class="summary-label">{cgst_label}</td>
                         <td class="summary-value">{_money(cgst_amount)}</td>
                     </tr>
                     <tr>
-                        <td class="summary-label">SGST ({gst_rate / 2:g}%)</td>
+                        <td class="summary-label">{sgst_label}</td>
                         <td class="summary-value">{_money(sgst_amount)}</td>
                     </tr>
                     <tr>
@@ -943,15 +974,13 @@ table {{
             </td>
 
             <td class="qr-cell">
-                <img src="qr://invoice-payment" width="88" height="88">
-                <div class="qr-title">SCAN TO PAY</div>
-                <div class="qr-amount">{_money(total)}</div>
-                <div class="qr-upi">{escape(UPI_ID)}</div>
+                {payment_qr_html}
             </td>
         </tr>
     </table>
 
 
+    {exchange_note}
     <div class="amount-words">
         <b>Amount in Words:</b>
         {escape(_amount_in_words(total))}
@@ -1023,6 +1052,11 @@ def build_receipt_text(bill_row, bill_items):
         "-" * 75,
     ]
 
+    if _value(bill_row, 'exchange_from_no', ''):
+        lines.append(f"Exchange against {_value(bill_row, 'exchange_from_no', '')}")
+        lines.append(f"Returned value: {_money(_value(bill_row, 'exchange_returned_cents', 0)/100)}; "
+                     f"New purchases: {_money(_value(bill_row, 'exchange_replacement_cents', 0)/100)}; no refund.")
+
     for item in bill_items:
         name = str(
             _value(item, "item_name_snapshot", "")
@@ -1038,6 +1072,10 @@ def build_receipt_text(bill_row, bill_items):
             f"{_money(rate):>12} "
             f"{_money(subtotal):>14}"
         )
+
+        offer_name = _value(item, 'offer_name_snapshot', '')
+        if offer_name:
+            lines.append(f"  Offer: {offer_name} — saved {_money(_value(item, 'offer_discount', 0))}")
 
     lines.extend(
         [
@@ -1077,14 +1115,84 @@ def build_receipt_text(bill_row, bill_items):
     return "\n".join(lines)
 
 
+class PrinterDialog(QDialog):
+    """A visible Qt printer chooser, including a useful no-printer state in .exe builds."""
+    def __init__(self, printer, parent=None):
+        super().__init__(parent)
+        self.printer = printer
+        self.setWindowTitle("Print receipt")
+        layout = QVBoxLayout(self)
+        self.transport = printing_backend()
+        note = self.status = QLabel("Choose a printer for this A4 receipt.")
+        note.setWordWrap(True)
+        layout.addWidget(note)
+        form = QFormLayout()
+        self.printers = QComboBox()
+        try:
+            names = available_printers()
+        except ValueError as exc:
+            names = []; note.setText(str(exc))
+        self.printers.addItems(names)
+        default = self.printers.findText(QPrinterInfo.defaultPrinterName())
+        if default >= 0:
+            self.printers.setCurrentIndex(default)
+        form.addRow("Printer:", self.printers)
+        self.copies = QSpinBox()
+        self.copies.setRange(1, 99)
+        form.addRow("Copies:", self.copies)
+        layout.addLayout(form)
+        if not names:
+            note.setText(note.text().splitlines()[0]+"\n"+printer_setup_hint())
+        actions = QHBoxLayout();layout.addLayout(actions)
+        refresh = QPushButton("Refresh printers");refresh.clicked.connect(self.refresh_printers);actions.addWidget(refresh)
+        help_button = QPushButton("Setup / help");help_button.clicked.connect(lambda: QMessageBox.information(self,"Printer setup",printer_setup_help()));actions.addWidget(help_button)
+        status_button = QPushButton("Queue status");status_button.clicked.connect(self.show_queue_status);actions.addWidget(status_button)
+        buttons = self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        buttons.button(QDialogButtonBox.Ok).setText("Print")
+        buttons.button(QDialogButtonBox.Ok).setEnabled(bool(names))
+        buttons.accepted.connect(self._select)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+        fit_window(self, 480, 240)
+
+    def show_queue_status(self):
+        try:message=queue_status(self.printers.currentText())
+        except ValueError as exc:message=str(exc)
+        QMessageBox.information(self,'Printer queue',message)
+
+    def refresh_printers(self):
+        previous=self.printers.currentText();self.transport=printing_backend()
+        try:
+            names=available_printers();message='Choose a printer for this A4 receipt.'
+        except ValueError as exc:
+            names=[];message=str(exc)
+        self.printers.clear();self.printers.addItems(names)
+        index=self.printers.findText(previous)
+        self.printers.setCurrentIndex(max(0,index))
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(bool(names))
+        self.status.setText(message if names else message.splitlines()[0]+'\n'+printer_setup_hint())
+
+    def _select(self):
+        self.queue=self.printers.currentText()
+        self.printer.setCopyCount(self.copies.value())
+        try:
+            if self.transport=='cups':check_cups_queue(self.queue)
+            else:
+                self.printer.setPrinterName(self.queue)
+                if not self.printer.isValid():raise ValueError('The printer is unavailable. Check its connection and driver.')
+        except ValueError as exc:
+            QMessageBox.warning(self,'Printer unavailable',str(exc));return
+        self.accept()
+
+
 class ReceiptDialog(QDialog):
-    def __init__(self, bill_row, bill_items, parent=None):
+    def __init__(self, bill_row, bill_items, parent=None, html=None):
         super().__init__(parent)
 
         self.setWindowTitle(
             f"Tax Invoice - {_value(bill_row, 'bill_no', '')}"
         )
-        self.resize(900, 1100)
+        fit_window(self, 900, 760)
 
         self.bill_row = bill_row
         self.bill_items = bill_items
@@ -1100,19 +1208,18 @@ class ReceiptDialog(QDialog):
 
         # Register the bill-specific UPI QR as a document resource so it
         # prints correctly in both the A4 printer output and saved PDF.
-        qr_image = _make_payment_qr_image(
-            bill_row,
-            _value(bill_row, "total", 0),
-        )
-        if not qr_image.isNull():
-            document.addResource(
-                QTextDocument.ImageResource,
-                QUrl("qr://invoice-payment"),
-                qr_image,
-            )
+        paid_amount = _paid_amount(bill_row)
+        if paid_amount > 0 and html is None:
+            qr_image = _make_payment_qr_image(bill_row, paid_amount)
+            if not qr_image.isNull():
+                document.addResource(
+                    QTextDocument.ImageResource,
+                    QUrl("qr://invoice-payment"),
+                    qr_image,
+                )
 
         document.setHtml(
-            build_receipt_html(bill_row, bill_items)
+            html if html is not None else build_receipt_html(bill_row, bill_items)
         )
 
         # Force the preview to be a real A4 page.
@@ -1121,18 +1228,21 @@ class ReceiptDialog(QDialog):
         )
 
         self.text_edit.setDocument(document)
-        layout.addWidget(self.text_edit)
+        self.text_edit.setMinimumSize(0, 80)
+        layout.addWidget(self.text_edit, 1)
 
         btn_row = QHBoxLayout()
 
-        print_btn = QPushButton("Print A4")
+        print_btn = self.print_button = QPushButton("Print A4")
         print_btn.clicked.connect(self.print_receipt)
+        print_btn.setAutoDefault(False)
 
-        pdf_btn = QPushButton("Save as PDF")
+        pdf_btn = self.pdf_button = QPushButton("Save PDF")
         pdf_btn.setProperty("role", "secondary")
         pdf_btn.clicked.connect(self.save_pdf)
+        pdf_btn.setAutoDefault(False)
 
-        close_btn = QPushButton("Close")
+        close_btn = self.close_button = QPushButton("Close")
         close_btn.setProperty("role", "secondary")
         close_btn.clicked.connect(self.accept)
 
@@ -1147,13 +1257,7 @@ class ReceiptDialog(QDialog):
     def _configure_printer(printer):
         printer.setResolution(300)
         printer.setPageSize(QPageSize(QPageSize.A4))
-        printer.setPageMargins(
-            4,
-            4,
-            4,
-            4,
-            QPrinter.Millimeter,
-        )
+        printer.setPageMargins(QMarginsF(4, 4, 4, 4), QPageLayout.Millimeter)
 
     def _prepare_document_for_printer(self, printer):
         page_rect = printer.pageRect(QPrinter.Point)
@@ -1161,47 +1265,57 @@ class ReceiptDialog(QDialog):
             page_rect.size()
         )
 
-    def print_receipt(self):
-        printer = QPrinter(QPrinter.HighResolution)
-        self._configure_printer(printer)
-
-        dialog = QPrintDialog(printer, self)
-
-        if dialog.exec() == QDialog.Accepted:
+    def _print_document(self, printer):
+        if not printer.isValid():
+            raise RuntimeError("The selected printer is unavailable. Check its driver and connection.")
+        document = self.text_edit.document()
+        previous_size = document.pageSize()
+        try:
             self._prepare_document_for_printer(printer)
-            self.text_edit.document().print_(printer)
-            self.text_edit.document().setPageSize(
-                QSizeF(A4_WIDTH_PT, A4_HEIGHT_PT)
-            )
+            document.print_(printer)
+            if printer.printerState() in (QPrinter.Error, QPrinter.Aborted):
+                raise RuntimeError("The print job failed or was cancelled. Check the system print queue and printer connection.")
+            if printer.outputFormat() == QPrinter.PdfFormat:
+                path = Path(printer.outputFileName())
+                with path.open('rb') as stream:
+                    if stream.read(5) != b'%PDF-':
+                        raise RuntimeError("The PDF could not be created. Choose another folder and try again.")
+        finally:
+            document.setPageSize(previous_size)
+
+    def print_receipt(self):
+        try:
+            printer = QPrinter(QPrinter.HighResolution)
+            dialog = PrinterDialog(printer, self)
+            if dialog.exec() != QDialog.Accepted:
+                return
+            self._configure_printer(printer)
+            printer.setDocName(str(_value(self.bill_row, 'bill_no', 'Receipt')))
+            if getattr(dialog,'transport','qt')=='cups':
+                with tempfile.TemporaryDirectory(prefix='cloth-receipt-') as folder:
+                    path=Path(folder)/'receipt.pdf'
+                    printer.setOutputFormat(QPrinter.PdfFormat);printer.setCopyCount(1);printer.setOutputFileName(str(path))
+                    self._print_document(printer)
+                    job=submit_pdf(path,dialog.queue,210,297,300,dialog.copies.value(),printer.docName())
+                QMessageBox.information(self,'Receipt submitted','CUPS job '+job+'\nCheck the printer queue and paper output.')
+            else:self._print_document(printer)
+        except Exception as exc:
+            QMessageBox.warning(self, "Could not print receipt", str(exc))
 
     def save_pdf(self):
-        default_name = (
-            f"{_value(self.bill_row, 'bill_no', 'invoice')}.pdf"
-        )
-
-        path, _ = QFileDialog.getSaveFileName(
-            self,
-            "Save Tax Invoice as PDF",
-            default_name,
-            "PDF Files (*.pdf)",
-        )
-
+        default_name = f"{_value(self.bill_row, 'bill_no', 'invoice')}.pdf"
+        path, _ = QFileDialog.getSaveFileName(self, "Save Tax Invoice as PDF", default_name, "PDF Files (*.pdf)")
         if not path:
             return
-
-        printer = QPrinter(QPrinter.HighResolution)
-        self._configure_printer(printer)
-        printer.setOutputFormat(QPrinter.PdfFormat)
-        printer.setOutputFileName(path)
-
-        self._prepare_document_for_printer(printer)
-        self.text_edit.document().print_(printer)
-        self.text_edit.document().setPageSize(
-            QSizeF(A4_WIDTH_PT, A4_HEIGHT_PT)
-        )
-
-        QMessageBox.information(
-            self,
-            "Saved",
-            f"A4 tax invoice saved to:\n{path}",
-        )
+        if not path.lower().endswith('.pdf'):
+            path += '.pdf'
+        try:
+            printer = QPrinter(QPrinter.HighResolution)
+            self._configure_printer(printer)
+            printer.setOutputFormat(QPrinter.PdfFormat)
+            printer.setOutputFileName(path)
+            self._print_document(printer)
+        except Exception as exc:
+            QMessageBox.warning(self, "Could not save PDF", str(exc))
+            return
+        QMessageBox.information(self, "Saved", f"A4 tax invoice saved to:\n{path}")

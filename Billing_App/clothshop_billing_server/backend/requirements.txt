@@ -1,4 +1,0 @@
-fastapi>=0.115
-uvicorn>=0.30
-pydantic>=2.9
-qrcode[pil]>=7.4

@@ -303,8 +303,13 @@ class InventoryTab(QWidget):
             return
         name, ok = QInputDialog.getText(self, "Rename Category", "New name:", text=item.text())
         if ok and name.strip():
-            self.db.rename_category(item.data(Qt.UserRole), name.strip())
-            self._refresh_categories(select_id=item.data(Qt.UserRole))
+            selected_id = item.data(Qt.UserRole)
+            try:
+                self.db.rename_category(selected_id, name.strip())
+            except Exception as exc:
+                QMessageBox.warning(self, "Could not rename category", str(exc))
+                return
+            self._refresh_categories(select_id=selected_id)
             self._notify_catalog_changed()
 
     def _delete_category(self):
@@ -313,7 +318,8 @@ class InventoryTab(QWidget):
             return
         confirm = QMessageBox.question(
             self, "Delete Category",
-            f"Delete category '{item.text()}'? Items using it must be removed first."
+            f"Remove category '{item.text()}'? Active items must be removed or moved first. "
+            "Removed items and past sales will remain archived."
         )
         if confirm == QMessageBox.Yes:
             try:
@@ -346,8 +352,13 @@ class InventoryTab(QWidget):
             return
         name, ok = QInputDialog.getText(self, "Rename", "New name:", text=item.text())
         if ok and name.strip():
-            self.db.rename_subtype(item.data(Qt.UserRole), name.strip())
-            self._refresh_subtypes(select_id=item.data(Qt.UserRole))
+            selected_id = item.data(Qt.UserRole)
+            try:
+                self.db.rename_subtype(selected_id, name.strip())
+            except Exception as exc:
+                QMessageBox.warning(self, "Could not rename brand / style", str(exc))
+                return
+            self._refresh_subtypes(select_id=selected_id)
             self._notify_catalog_changed()
 
     def _delete_subtype(self):

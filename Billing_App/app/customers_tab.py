@@ -22,6 +22,8 @@ from PySide6.QtWidgets import (
 )
 
 from PySide6.QtCore import Qt
+from receipt import ReceiptDialog
+from paging import Pager
 
 from widgets import (
     rupees,
@@ -29,10 +31,11 @@ from widgets import (
     confirm_delete_password,
 )
 from receipt import ReceiptDialog
+from paging import Pager
 
 
 class CustomersTab(QWidget):
-    def __init__(self, db):
+    def __init__(self, db, autoload=True):
         super().__init__()
 
         self.db = db
@@ -41,7 +44,8 @@ class CustomersTab(QWidget):
         self._history_cache = []
 
         self._build_ui()
-        self._refresh_customer_list()
+        if autoload:
+            self._refresh_customer_list()
 
     # ============================================================
     # UI
@@ -118,6 +122,9 @@ class CustomersTab(QWidget):
         self.customer_table.itemSelectionChanged.connect(self._on_customer_selected)
 
         left_v.addWidget(self.customer_table)
+        self.customer_pager = Pager()
+        self.customer_pager.changed.connect(self._refresh_customer_list)
+        left_v.addWidget(self.customer_pager)
 
         content.addWidget(left_box)
 
@@ -267,6 +274,9 @@ class CustomersTab(QWidget):
 
         self.history_table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.history_table.cellClicked.connect(self._open_history_receipt)
+        self.history_table.setToolTip("Click a bill row to view or print its receipt.")
+        self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
 
         # Bug fix: the only way to open a bill from Purchase History was
         # to double-click the row, which most people never discover --
@@ -277,6 +287,9 @@ class CustomersTab(QWidget):
         self.history_table.doubleClicked.connect(self._view_bill)
 
         history_v.addWidget(self.history_table)
+        self.history_pager = Pager()
+        self.history_pager.changed.connect(lambda: self._load_customer(self.selected_customer_id) if self.selected_customer_id else None)
+        history_v.addWidget(self.history_pager)
 
         history_hint = QLabel("Click \u201cView\u201d (or double-click a row) to open / reprint a bill.")
         history_hint.setStyleSheet("color: #6c757d; font-size: 11px;")
@@ -358,7 +371,10 @@ class CustomersTab(QWidget):
 
         text = self.search_input.text().strip()
 
-        customers = self.db.search_customers(text)
+        self.customer_pager.filter(text)
+        total, customers = self.db.customer_page(text,self.customer_pager.size,self.customer_pager.offset)
+        self.customer_pager.set_total(total)
+        self.customer_table.blockSignals(True)
 
         self.customer_table.setRowCount(len(customers))
 
@@ -367,7 +383,7 @@ class CustomersTab(QWidget):
         for row_idx, c in enumerate(customers):
             self._customer_ids.append(c["id"])
 
-            total_spent, _ = self.db.get_customer_total_spent(c["id"])
+            total_spent = c["total_spent"]
 
             self.customer_table.setItem(
                 row_idx,
@@ -386,6 +402,14 @@ class CustomersTab(QWidget):
                 2,
                 QTableWidgetItem(rupees(total_spent)),
             )
+
+        self.customer_table.clearSelection()
+        if self.selected_customer_id in self._customer_ids:
+            self.customer_table.selectRow(self._customer_ids.index(self.selected_customer_id))
+            self._load_customer(self.selected_customer_id)
+        elif self.selected_customer_id is not None:
+            self._start_new_customer()
+        self.customer_table.blockSignals(False)
 
     # ============================================================
     # CUSTOMER SELECTION
@@ -427,22 +451,18 @@ class CustomersTab(QWidget):
 
         self.address_input.setText(customer["address"] or "")
 
-        total_spent, visit_count = self.db.get_customer_total_spent(cid)
-
+        self.history_pager.filter(cid)
+        result = self.db.sales_page(limit=self.history_pager.size,offset=self.history_pager.offset,customer=cid)
+        self.history_pager.set_total(result['summary']['count'])
         self.summary_label.setText(
-            f"Customer since "
-            f"{customer['created_at'][:10]} "
-            f"• {visit_count} visit(s) "
-            f"• {rupees(total_spent)} total spent"
+            f"Customer since {customer['created_at'][:10]} • "
+            f"{result['summary']['count']} visit(s) • "
+            f"{rupees(result['summary']['revenue'])} total spent"
         )
-
-        # --------------------------------------------------------
-        # Purchase history
-        # --------------------------------------------------------
-
-        history = self.db.get_customer_purchase_history(cid)
+        history = result['rows']
         self._history_cache = history
 
+        self._history_bill_ids = [b["id"] for b in history]
         self.history_table.setRowCount(len(history))
 
         for row_idx, b in enumerate(history):
@@ -614,6 +634,8 @@ class CustomersTab(QWidget):
         self.summary_label.clear()
 
         # Clear old history
+        self.history_pager.set_total(0)
+        self._history_bill_ids = []
         self.history_table.setRowCount(0)
 
         # Clear old wishlist
@@ -700,7 +722,6 @@ class CustomersTab(QWidget):
                 name,
                 phone,
                 address,
-                "",
             )
 
             self._refresh_customer_list()
@@ -799,7 +820,11 @@ class CustomersTab(QWidget):
         ):
             return
 
-        self.db.delete_bill(bill_id)
+        try:
+            self.db.delete_bill(bill_id)
+        except ValueError as exc:
+            QMessageBox.warning(self, 'Cannot remove bill', str(exc))
+            return
 
         self._refresh_customer_list()
 
@@ -852,6 +877,8 @@ class CustomersTab(QWidget):
 
         self.summary_label.clear()
 
+        self.history_pager.set_total(0)
+        self._history_bill_ids = []
         self.history_table.setRowCount(0)
 
         self.wishlist_table.setRowCount(0)
@@ -859,3 +886,12 @@ class CustomersTab(QWidget):
         self.save_customer_btn.setText("Save Changes")
 
         self._refresh_customer_list()
+
+    def _open_history_receipt(self, row, column):
+        if column == 4:
+            return
+        ids = getattr(self, '_history_bill_ids', [])
+        if 0 <= row < len(ids):
+            bill, items = self.db.get_bill(ids[row])
+            if bill:
+                ReceiptDialog(bill, items, self).exec()

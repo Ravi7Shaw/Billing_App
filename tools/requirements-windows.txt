@@ -1,0 +1,8 @@
+# Windows x64 CPython 3.10-3.14; wheel-only installation.
+PySide6==6.10.3
+matplotlib==3.10.8
+qrcode[pil]==8.2
+pyinstaller==6.22.3
+
+# Code 128 label generation
+python-barcode==0.16.1

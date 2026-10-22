@@ -6,7 +6,11 @@ pants, and ladies wear — with or without barcodes.
 
 ## 1. Setup
 
-Requires Python 3.9+.
+For Windows, use `setup.bat` at the repository root (standard x64 CPython
+3.10–3.14; Python 3.13 recommended). Keep the complete repository, including
+`tools/`. See the root README for detailed setup and log locations.
+
+For a direct source run on other platforms, Python 3.9+ is supported:
 
 ```bash
 cd app
@@ -20,7 +24,20 @@ The database file is created automatically on first run at:
 
 Back up that one file to back up your entire shop's data.
 
-## 2. What's inside
+## Employee and admin access
+
+The app starts in Employee mode with only **New Bill**. Employees can scan or
+select existing catalog items, change quantities, enter a customer for the sale,
+and print/save the receipt. Catalog prices are fixed; GST is added automatically
+to the amount due. Full payment is required. Discounts, price changes, new catalog
+items, backdating, partial payments, credit and management tabs require admin access.
+
+Use **Admin login** with the configured admin password to unlock every tab.
+**Lock admin / Employee mode** logs out and clears the unfinished bill. Restarting
+the app also starts in Employee mode. Switching into admin asks before discarding
+an employee's unfinished bill. Keep optional customer and item fields blank as before.
+
+## 2. What's inside (admin dashboard)
 
 | Tab | Purpose |
 |---|---|
@@ -70,11 +87,11 @@ glancing at the screen doesn't see it by default.
 
 Both **Sales History** and **Customers** have a **Remove** button (per bill,
 and for a whole customer). Removing anything asks for a confirmation and
-then a password — **1852** — so it can't happen by accident or by someone
+then the admin password — so it can't happen by accident or by someone
 just clicking around. Removing a bill also puts its stock quantities back.
 Removing a customer keeps their past bills in your sales records (as
-walk-in sales) but deletes their profile and wishlist. To change the
-password, edit `DELETE_PASSWORD` near the top of `widgets.py`.
+walk-in sales) but deletes their profile and wishlist. Login and deletion
+confirmations use the same password verifier in `access.py`.
 
 ## 7. Customizing the receipt
 
@@ -123,16 +140,30 @@ double-click, with no need to install Python on the shop's computer.
 **Easiest way:** double-click `build_windows.bat` inside the `app` folder.
 It installs everything needed and builds the exe for you.
 
-**Manual way**, from a Command Prompt inside the `app` folder:
+The build uses the shared setup helper, a private `.venv-windows` environment,
+and the compatible versions in `tools/requirements-windows.txt`. To prepare and
+check without building, run the repository's `setup.bat --skip-build`.
 
-```cmd
-pip install -r requirements.txt
-pip install pyinstaller
-pyinstaller --noconsole --onefile --name ClothShopBilling --icon=assets\icon.ico --add-data "assets;assets" main.py
-```
+Detailed failures are saved in `setup.log` inside the selected `app` folder.
 
 Either way, the finished file appears at `dist\ClothShopBilling.exe` — copy
 that one file to the shop's desktop. Right-click it any time and choose
 "Pin to Start" or "Pin to taskbar" to make it a normal-looking desktop app
 with your icon.
 
+
+## Billing and inventory updates
+
+- Amounts and payments use two decimal places, rounding half up; GST is rounded
+  per bill line before the bill total is calculated.
+- Products with the same name can have separate size/color/barcode variants.
+  Suggestions show variant details when needed. These fields remain optional.
+- A rate entered while billing applies to that sale. Use Inventory to change
+  the catalogue price or product details.
+- Removing a category with only removed products archives the category and keeps
+  historical sales links. Adding the same category name again restores it.
+- Receipt Paid and Balance values reflect payments recorded when the receipt is
+  opened. Reopen a receipt from Sales History after recording a later payment.
+
+Regression commands and historical data limitations are documented in the
+repository's `tests/README.md`.

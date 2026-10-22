@@ -5,27 +5,26 @@ A record of everything sold: filter by date range or search, view any
 bill's line items, reprint, or export to CSV.
 """
 
-import csv
-from datetime import date, timedelta
-
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QLabel, QLineEdit,
-    QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QDateEdit,
-    QComboBox, QSpinBox, QFileDialog, QMessageBox, QDialog
+    QPushButton, QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox
 )
-from PySide6.QtCore import Qt, QDate
 
 from widgets import rupees, make_heading, confirm_delete_password
 from receipt import ReceiptDialog
+from period_filter import PeriodFilter
+from report_export import export_csv
+from paging import Pager
 
 
 class SalesTab(QWidget):
-    def __init__(self, db):
+    def __init__(self, db, autoload=True):
         super().__init__()
         self.db = db
         self._bills_cache = []
         self._build_ui()
-        self.refresh()
+        if autoload:
+            self.refresh()
 
     def _build_ui(self):
         outer = QVBoxLayout(self)
@@ -33,66 +32,13 @@ class SalesTab(QWidget):
         outer.setSpacing(12)
         outer.addWidget(make_heading("Sales History", "Every bill, what sold, and when"))
 
-        filter_box = QGroupBox("Filters")
+        self.period = PeriodFilter()
+        self.period.changed.connect(self.refresh)
+        outer.addWidget(self.period)
+        self.date_from, self.date_to = self.period.date_from, self.period.date_to
+        self.quick_range_combo = self.period.preset
+        filter_box = QGroupBox("Search and export")
         filter_row = QHBoxLayout(filter_box)
-
-        filter_row.addWidget(QLabel("From:"))
-        self.date_from = QDateEdit(calendarPopup=True)
-        self.date_from.setDisplayFormat("dd-MM-yyyy")
-        self.date_from.setDate(QDate.currentDate().addMonths(-1))
-        filter_row.addWidget(self.date_from)
-
-        filter_row.addWidget(QLabel("To:"))
-        self.date_to = QDateEdit(calendarPopup=True)
-        self.date_to.setDisplayFormat("dd-MM-yyyy")
-        self.date_to.setDate(QDate.currentDate())
-        filter_row.addWidget(self.date_to)
-
-        self.quick_range_combo = QComboBox()
-        self.quick_range_combo.addItems(["Custom", "Today", "Last 7 days", "Last 30 days", "This month", "All time"])
-        self.quick_range_combo.currentTextChanged.connect(self._apply_quick_range)
-        filter_row.addWidget(self.quick_range_combo)
-
-        # Month-range picker: lets the user pick "from this month ...
-        # to this month" directly (e.g. Jan 2026 to Jun 2026) instead of
-        # having to pick exact days, and feeds the same date_from/date_to
-        # used everywhere below -- including "Export CSV", so exporting
-        # a specific range of months is just: pick the two months here,
-        # click Apply, then Export CSV.
-        filter_row.addWidget(QLabel("  Month range:"))
-        month_names = [
-            "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-            "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-        ]
-        today = QDate.currentDate()
-
-        self.from_month_combo = QComboBox()
-        self.from_month_combo.addItems(month_names)
-        self.from_month_combo.setCurrentIndex(today.month() - 1)
-        filter_row.addWidget(self.from_month_combo)
-
-        self.from_year_spin = QSpinBox()
-        self.from_year_spin.setRange(2000, today.year() + 1)
-        self.from_year_spin.setValue(today.year())
-        filter_row.addWidget(self.from_year_spin)
-
-        filter_row.addWidget(QLabel("to"))
-
-        self.to_month_combo = QComboBox()
-        self.to_month_combo.addItems(month_names)
-        self.to_month_combo.setCurrentIndex(today.month() - 1)
-        filter_row.addWidget(self.to_month_combo)
-
-        self.to_year_spin = QSpinBox()
-        self.to_year_spin.setRange(2000, today.year() + 1)
-        self.to_year_spin.setValue(today.year())
-        filter_row.addWidget(self.to_year_spin)
-
-        apply_month_range_btn = QPushButton("Apply")
-        apply_month_range_btn.setProperty("role", "secondary")
-        apply_month_range_btn.setToolTip("Set the date filters above to this month range")
-        apply_month_range_btn.clicked.connect(self._apply_month_range)
-        filter_row.addWidget(apply_month_range_btn)
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Search bill no / customer / phone...")
@@ -118,6 +64,8 @@ class SalesTab(QWidget):
         self.bills_table.setHorizontalHeaderLabels(
             ["Bill No", "Date", "Customer", "Pieces", "Subtotal", "Discount", "Total", ""]
         )
+        self.bills_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.bills_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
         self.bills_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.bills_table.horizontalHeader().setSectionResizeMode(7, QHeaderView.Fixed)
         self.bills_table.setColumnWidth(7, 90)
@@ -125,67 +73,36 @@ class SalesTab(QWidget):
         self.bills_table.setSelectionBehavior(QTableWidget.SelectRows)
         self.bills_table.doubleClicked.connect(self._view_bill)
         outer.addWidget(self.bills_table, 1)
+        self.pager = Pager()
+        self.pager.changed.connect(self.refresh)
+        outer.addWidget(self.pager)
 
         hint = QLabel("Double-click a bill to view / reprint it.")
         hint.setStyleSheet("color: #6c757d; font-size: 11px;")
         outer.addWidget(hint)
 
-    def _apply_month_range(self):
-        from_year = self.from_year_spin.value()
-        from_month = self.from_month_combo.currentIndex() + 1
-        to_year = self.to_year_spin.value()
-        to_month = self.to_month_combo.currentIndex() + 1
-
-        start = QDate(from_year, from_month, 1)
-        end = QDate(to_year, to_month, 1).addMonths(1).addDays(-1)  # last day of that month
-
-        if start > end:
-            QMessageBox.warning(
-                self, "Invalid range", "The 'from' month must not be after the 'to' month."
-            )
-            return
-
-        self.quick_range_combo.blockSignals(True)
-        self.quick_range_combo.setCurrentText("Custom")
-        self.quick_range_combo.blockSignals(False)
-        self.date_from.setDate(start)
-        self.date_to.setDate(end)
-        self.refresh()
-
-    def _apply_quick_range(self, label):
-        today = QDate.currentDate()
-        if label == "Today":
-            self.date_from.setDate(today)
-            self.date_to.setDate(today)
-        elif label == "Last 7 days":
-            self.date_from.setDate(today.addDays(-6))
-            self.date_to.setDate(today)
-        elif label == "Last 30 days":
-            self.date_from.setDate(today.addDays(-29))
-            self.date_to.setDate(today)
-        elif label == "This month":
-            self.date_from.setDate(QDate(today.year(), today.month(), 1))
-            self.date_to.setDate(today)
-        elif label == "All time":
-            self.date_from.setDate(QDate(2000, 1, 1))
-            self.date_to.setDate(today)
-        else:
-            return
-        self.refresh()
-
     def refresh(self):
-        date_from = self.date_from.date().toString("yyyy-MM-dd")
-        date_to = self.date_to.date().toString("yyyy-MM-dd")
+        try:
+            date_from, date_to = self.period.bounds()
+        except ValueError as exc:
+            self.pager.set_total(0)
+            self._bills_cache = []
+            self.bills_table.setRowCount(0)
+            self.summary_label.setText(str(exc))
+            return False
         search = self.search_input.text().strip() or None
-        bills = self.db.search_bills(date_from=date_from, date_to=date_to, search_text=search)
+        self.pager.filter((date_from,date_to,search))
+        result = self.db.sales_page(date_from,date_to,search, self.pager.size,self.pager.offset)
+        self.pager.set_total(result['summary']['count'])
+        bills = result['rows']
         self._bills_cache = bills
 
         self.bills_table.setRowCount(len(bills))
-        total_revenue = 0
-        total_pieces = 0
+        total_revenue = result['summary']['revenue']
+        total_pieces = result['summary']['pieces']
         for row_idx, b in enumerate(bills):
             self.bills_table.setItem(row_idx, 0, QTableWidgetItem(b["bill_no"]))
-            self.bills_table.setItem(row_idx, 1, QTableWidgetItem(b["bill_date"]))
+            self.bills_table.setItem(row_idx, 1, QTableWidgetItem(b["bill_date"][:10]))
             self.bills_table.setItem(row_idx, 2, QTableWidgetItem(b["customer_name"] or "Walk-in"))
             self.bills_table.setItem(row_idx, 3, QTableWidgetItem(str(b["piece_count"])))
             self.bills_table.setItem(row_idx, 4, QTableWidgetItem(rupees(b["subtotal"])))
@@ -199,13 +116,13 @@ class SalesTab(QWidget):
             remove_btn.clicked.connect(lambda _, bid=bill_id, no=b["bill_no"]: self._delete_bill(bid, no))
             self.bills_table.setCellWidget(row_idx, 7, remove_btn)
 
-            total_revenue += b["total"]
-            total_pieces += b["piece_count"]
         self.bills_table.resizeRowsToContents()
 
         self.summary_label.setText(
-            f"{len(bills)} bill(s) \u2022 {total_pieces} piece(s) sold \u2022 {rupees(total_revenue)} total"
+            f"{result['summary']['count']} bill(s) \u2022 {total_pieces} piece(s) sold \u2022 {rupees(total_revenue)} total"
         )
+
+        return True
 
     def _view_bill(self):
         rows = self.bills_table.selectionModel().selectedRows()
@@ -225,23 +142,19 @@ class SalesTab(QWidget):
             return
         if not confirm_delete_password(self, f"remove bill '{bill_no}'"):
             return
-        self.db.delete_bill(bill_id)
+        try:
+            self.db.delete_bill(bill_id)
+        except ValueError as exc:
+            QMessageBox.warning(self, 'Cannot remove bill', str(exc))
+            return
         self.refresh()
 
     def _export_csv(self):
-        if not self._bills_cache:
-            QMessageBox.information(self, "Nothing to export", "No bills match the current filter.")
+        if not self.refresh():
             return
-        path, _ = QFileDialog.getSaveFileName(self, "Export Sales to CSV", "sales_export.csv", "CSV Files (*.csv)")
-        if not path:
-            return
-        with open(path, "w", newline="", encoding="utf-8") as f:
-            writer = csv.writer(f)
-            writer.writerow(["Bill No", "Date", "Customer", "Phone", "Pieces", "Subtotal", "Discount", "Total"])
-            for b in self._bills_cache:
-                writer.writerow([
-                    b["bill_no"], b["bill_date"], b["customer_name"] or "Walk-in",
-                    b["customer_phone"] or "", b["piece_count"], b["subtotal"],
-                    b["discount_amount"], b["total"],
-                ])
-        QMessageBox.information(self, "Exported", f"Saved to:\n{path}")
+        bills = self.db.export_bill_rows(*self.period.bounds(), self.search_input.text().strip())
+        export_csv(self, "Export Sales", "sales_export.csv",
+                   ["Bill No", "Date", "Customer", "Phone", "Pieces", "Subtotal", "Discount", "Total"],
+                   ([b["bill_no"], b["bill_date"], b["customer_name"] or "Walk-in",
+                     b["customer_phone"] or "", b["piece_count"], b["subtotal"],
+                     b["discount_amount"], b["total"]] for b in bills))

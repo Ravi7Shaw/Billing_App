@@ -1,19 +1,8 @@
 PySide6>=6.6
 matplotlib>=3.7
 
-# Bug fix: the Application Status tab's Start Server button depends on
-# the FastAPI server in ../clothshop_billing_server/backend, but those
-# packages were never listed here -- so a plain `pip install -r
-# requirements.txt` (as the README's own setup instructions and
-# setup.bat both tell a new shop PC to run) left fastapi/uvicorn
-# missing entirely, and "Start Server" failed with a ModuleNotFoundError
-# the moment it tried to launch. Minimum versions only (not exact pins)
-# so pip can pick whatever prebuilt wheel matches your Python version --
-# an exact old pin (e.g. pydantic==2.9.2) has no prebuilt wheel for a
-# very new Python (3.13/3.14) and pip falls back to compiling
-# pydantic-core from source via Rust/maturin, which fails outright on
-# Python 3.14 since PyO3 doesn't support it yet.
-fastapi>=0.115
-uvicorn>=0.30
-pydantic>=2.9
+# Receipt payment QR codes
 qrcode[pil]>=7.4
+
+# Code 128 label generation
+python-barcode==0.16.1

@@ -45,7 +45,7 @@ QTabBar::tab {{
     background: {COLORS['surface']};
     border: 1px solid {COLORS['border']};
     border-bottom: none;
-    padding: 10px 22px;
+    padding: 6px 12px;
     margin-right: 3px;
     border-top-left-radius: 8px;
     border-top-right-radius: 8px;

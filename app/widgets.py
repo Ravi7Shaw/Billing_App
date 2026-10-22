@@ -11,9 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-# Deletions of bills / customers require this password so records aren't
-# removed by accident or by a curious customer glancing at the screen.
-DELETE_PASSWORD = "1852"
+from access import verify_admin_password
 
 
 def confirm_delete_password(parent, action_description: str) -> bool:
@@ -29,7 +27,7 @@ def confirm_delete_password(parent, action_description: str) -> bool:
     )
     if not ok:
         return False
-    if text != DELETE_PASSWORD:
+    if not verify_admin_password(text):
         QMessageBox.warning(parent, "Incorrect Password", "That password is not correct. Nothing was deleted.")
         return False
     return True
