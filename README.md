@@ -35,9 +35,10 @@ Admin controls share the tab row instead of taking a separate row.
 
 Receipts open within the screen's usable area. **Print A4**, **Save PDF** and
 **Close** stay outside the scrolling preview. Print opens a printer chooser with
-copies; install the printer's Windows driver if no printer is listed. Failed
-jobs show an error. If a submitted job does not reach paper, check the Windows
-print queue, connection and printer status.
+copies; install the printer driver and configure the system queue if none is
+listed. Linux uses CUPS when its command tools are installed; Windows uses the
+native printer driver. Failed jobs show an error. Check the system print queue,
+connection and printer status if a submitted job does not reach paper.
 
 In Admin mode, **Backup** lets you choose a folder for a complete SQLite `.db`
 backup. It includes customers, bills, payments, inventory and all other tables,
@@ -416,8 +417,11 @@ expenses**; use Chart of Accounts for the cost-based profit calculation.
 **Admin → Barcode Labels** provides a label designer and stock-linked print
 batches in both app copies. Install the updated requirements before running from
 source; Windows setup/update also installs the new `python-barcode` dependency.
-The Citizen CL-S621II photo is the target device; the app uses the installed OS
-printer driver rather than sending printer-language commands directly.
+The Citizen CL-S621II photo is the target device. Windows uses its installed
+printer driver through Qt. Linux uses CUPS command tools (`lp` / `lpstat`) when
+available, submitting an actual-size PDF and showing the CUPS job id. This also
+works when Qt cannot discover the CUPS printer. Without the command tools, the
+app uses Qt's native printer support. Both paths need a compatible printer driver.
 
 ### Design and metadata
 
@@ -474,7 +478,7 @@ printer driver rather than sending printer-language commands directly.
 4. The application requests the entered custom paper size, zero application
    margins, full-page drawing, one driver copy and **100% scale**. Requested
    label count is emitted as separate pages. It rejects a driver-reported paper
-   size mismatch, elements outside the paper, clipped text, obscured symbols,
+   size mismatch on the native driver path, elements outside the paper, clipped text, obscured symbols,
    and barcodes whose narrow modules would be under two device dots. Barcode/QR
    rotations use 90-degree steps, with quiet zones preserved.
 5. **PDF preview** saves one actual-size label and never changes stock. When
@@ -486,6 +490,46 @@ driver, calibration and hardware. Automated tests verify encoding, rendering,
 page size and the print workflow; they cannot certify a particular printer's
 physical output. A missing printer produces an actionable dialog, not a silent
 print button.
+
+### Arch Linux printing setup
+
+Run these commands on the Arch computer (they install/start the OS printing service):
+
+```bash
+sudo pacman -S cups cups-filters
+sudo systemctl enable --now cups.service
+lpstat -r
+```
+
+Add the printer in your desktop Print Settings or [CUPS administration](http://localhost:631).
+Install a driver for the printer model that accepts PDF documents and supports
+custom label dimensions. A raw queue cannot convert the PDF to Citizen printer
+commands. Choose the correct driver/language mode for the CL-S621II and print a
+system test page before using the app. A printer being plugged in alone does not
+create a working queue. Driverless setup applies only if the device supports it.
+
+In the app, open Print → **Refresh printers**, select the configured queue, and
+print **Calibration** first. The app rejects a paused or rejecting CUPS queue
+before creating a stock batch. After sending, it shows a job id such as
+`Citizen-42`; the label Print history also keeps this id. Check queued jobs with:
+
+```bash
+lpstat -p -a
+lpstat -o
+```
+
+For a filter/driver error, inspect `journalctl -u cups.service -n 80 --no-pager`
+and the CUPS error log on that machine. Resume or cancel jobs in Print Settings.
+Do not resubmit a timed-out job before checking the queue and physical output.
+**Setup / help** in both receipt and label dialogs includes OS-specific
+instructions. **Queue status** shows the selected Linux printer state and pending
+jobs, including driver/filter errors reported by CUPS. PDFs can be saved even
+when no printer is configured.
+
+On **Windows**, install the manufacturer's driver, print a Windows test page,
+then refresh/select the printer in the app. Source launches use the pulled code;
+an existing `.exe` needs **Update & rebuild** or the repository's `setup.bat` to
+include fixes. Linux CUPS commands are never used by the Windows print path.
 
 ### Quantity, confirmations and stock
 

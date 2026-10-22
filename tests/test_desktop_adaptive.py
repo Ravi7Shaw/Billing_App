@@ -49,7 +49,7 @@ class AdaptiveDesktopTests(unittest.TestCase):
         self.assertGreater(target.stat().st_size,1000)
 
     def test_no_installed_printer_keeps_dialog_visible_with_instructions(self):
-        with patch('receipt.QPrinterInfo.availablePrinterNames',return_value=[]):
+        with patch('receipt.available_printers',return_value=[]):
             dialog = PrinterDialog(QPrinter(),self.receipt)
         self.addCleanup(dialog.close)
         dialog.show();self.app.processEvents()

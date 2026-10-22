@@ -9,7 +9,9 @@ from html import escape
 from urllib.parse import urlencode
 
 from io import BytesIO
+import tempfile
 from pathlib import Path
+from printing import printing_backend, available_printers, printer_setup_help, printer_setup_hint, check_cups_queue, submit_pdf, queue_status
 from window_utils import fit_window
 
 from PySide6.QtWidgets import (
@@ -1120,12 +1122,16 @@ class PrinterDialog(QDialog):
         self.printer = printer
         self.setWindowTitle("Print receipt")
         layout = QVBoxLayout(self)
-        note = QLabel("Choose a Windows printer for this A4 receipt.")
+        self.transport = printing_backend()
+        note = self.status = QLabel("Choose a printer for this A4 receipt.")
         note.setWordWrap(True)
         layout.addWidget(note)
         form = QFormLayout()
         self.printers = QComboBox()
-        names = QPrinterInfo.availablePrinterNames()
+        try:
+            names = available_printers()
+        except ValueError as exc:
+            names = []; note.setText(str(exc))
         self.printers.addItems(names)
         default = self.printers.findText(QPrinterInfo.defaultPrinterName())
         if default >= 0:
@@ -1136,10 +1142,12 @@ class PrinterDialog(QDialog):
         form.addRow("Copies:", self.copies)
         layout.addLayout(form)
         if not names:
-            note.setText("No printer is installed or available. Add your printer in Windows Settings → "
-                         "Bluetooth & devices → Printers & scanners, then reopen Print. "
-                         "You can also save this receipt as a PDF.")
-        buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            note.setText(note.text().splitlines()[0]+"\n"+printer_setup_hint())
+        actions = QHBoxLayout();layout.addLayout(actions)
+        refresh = QPushButton("Refresh printers");refresh.clicked.connect(self.refresh_printers);actions.addWidget(refresh)
+        help_button = QPushButton("Setup / help");help_button.clicked.connect(lambda: QMessageBox.information(self,"Printer setup",printer_setup_help()));actions.addWidget(help_button)
+        status_button = QPushButton("Queue status");status_button.clicked.connect(self.show_queue_status);actions.addWidget(status_button)
+        buttons = self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         buttons.button(QDialogButtonBox.Ok).setText("Print")
         buttons.button(QDialogButtonBox.Ok).setEnabled(bool(names))
         buttons.accepted.connect(self._select)
@@ -1147,12 +1155,33 @@ class PrinterDialog(QDialog):
         layout.addWidget(buttons)
         fit_window(self, 480, 240)
 
+    def show_queue_status(self):
+        try:message=queue_status(self.printers.currentText())
+        except ValueError as exc:message=str(exc)
+        QMessageBox.information(self,'Printer queue',message)
+
+    def refresh_printers(self):
+        previous=self.printers.currentText();self.transport=printing_backend()
+        try:
+            names=available_printers();message='Choose a printer for this A4 receipt.'
+        except ValueError as exc:
+            names=[];message=str(exc)
+        self.printers.clear();self.printers.addItems(names)
+        index=self.printers.findText(previous)
+        self.printers.setCurrentIndex(max(0,index))
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(bool(names))
+        self.status.setText(message if names else message.splitlines()[0]+'\n'+printer_setup_hint())
+
     def _select(self):
-        self.printer.setPrinterName(self.printers.currentText())
+        self.queue=self.printers.currentText()
         self.printer.setCopyCount(self.copies.value())
-        if not self.printer.isValid():
-            QMessageBox.warning(self, "Printer unavailable", "Windows could not open this printer. Check its connection and driver.")
-            return
+        try:
+            if self.transport=='cups':check_cups_queue(self.queue)
+            else:
+                self.printer.setPrinterName(self.queue)
+                if not self.printer.isValid():raise ValueError('The printer is unavailable. Check its connection and driver.')
+        except ValueError as exc:
+            QMessageBox.warning(self,'Printer unavailable',str(exc));return
         self.accept()
 
 
@@ -1245,7 +1274,7 @@ class ReceiptDialog(QDialog):
             self._prepare_document_for_printer(printer)
             document.print_(printer)
             if printer.printerState() in (QPrinter.Error, QPrinter.Aborted):
-                raise RuntimeError("The print job failed or was cancelled. Check the Windows print queue and printer connection.")
+                raise RuntimeError("The print job failed or was cancelled. Check the system print queue and printer connection.")
             if printer.outputFormat() == QPrinter.PdfFormat:
                 path = Path(printer.outputFileName())
                 with path.open('rb') as stream:
@@ -1262,7 +1291,14 @@ class ReceiptDialog(QDialog):
                 return
             self._configure_printer(printer)
             printer.setDocName(str(_value(self.bill_row, 'bill_no', 'Receipt')))
-            self._print_document(printer)
+            if getattr(dialog,'transport','qt')=='cups':
+                with tempfile.TemporaryDirectory(prefix='cloth-receipt-') as folder:
+                    path=Path(folder)/'receipt.pdf'
+                    printer.setOutputFormat(QPrinter.PdfFormat);printer.setCopyCount(1);printer.setOutputFileName(str(path))
+                    self._print_document(printer)
+                    job=submit_pdf(path,dialog.queue,210,297,300,dialog.copies.value(),printer.docName())
+                QMessageBox.information(self,'Receipt submitted','CUPS job '+job+'\nCheck the printer queue and paper output.')
+            else:self._print_document(printer)
         except Exception as exc:
             QMessageBox.warning(self, "Could not print receipt", str(exc))
 

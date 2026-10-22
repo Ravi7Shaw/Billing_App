@@ -4,6 +4,7 @@ from copy import deepcopy
 import json
 from pathlib import Path
 import sqlite3
+import tempfile
 import uuid
 
 from PySide6.QtCore import Qt, QRectF, QPointF
@@ -13,11 +14,12 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, Q
     QComboBox, QLineEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox, QCheckBox, QPushButton,
     QFontComboBox, QFileDialog, QMessageBox, QInputDialog, QColorDialog, QDialog,
     QDialogButtonBox, QSplitter, QFrame)
-from PySide6.QtPrintSupport import QPrinter, QPrinterInfo
+from PySide6.QtPrintSupport import QPrinter
 
 from commerce_ui import combo, fill, number, button, note, table, populate, scroll, form_dialog
 from label_design import (PX_PER_MM, default_design, metadata_design, validate_design, draw_element, expand,
     metadata_for, custom_metadata, configure_label_printer, print_labels, calibration_design)
+from printing import printing_backend, available_printers, printer_setup_help, printer_setup_hint, check_cups_queue, submit_pdf, queue_status
 from window_utils import fit_window
 
 
@@ -101,16 +103,37 @@ class LabelPrinterDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle('Select label printer')
         layout=QVBoxLayout(self)
-        note('Install the Citizen driver on Windows or configure the printer in Linux CUPS, then load the label stock. Paper size is taken from this design; scaling is 100%.',layout)
-        self.printer=combo([(n,n) for n in QPrinterInfo.availablePrinterNames()]);layout.addWidget(self.printer)
-        index=next((i for i in range(self.printer.count()) if 'citizen' in self.printer.itemText(i).lower()),0)
-        self.printer.setCurrentIndex(index)
-        buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
-        buttons.button(QDialogButtonBox.Ok).setText('Continue')
-        buttons.button(QDialogButtonBox.Ok).setEnabled(self.printer.count()>0)
-        if not self.printer.count():note('No installed printer found. Add the printer in Windows Settings or Linux Print Settings (CUPS), then reopen this dialog. PDF preview is available without a printer.',layout)
-        buttons.accepted.connect(self.accept);buttons.rejected.connect(self.reject);layout.addWidget(buttons)
+        self.transport=printing_backend()
+        self.status=note('',layout)
+        self.printer=combo();layout.addWidget(self.printer)
+        actions=QHBoxLayout();layout.addLayout(actions)
+        button('Refresh printers',self.refresh_printers,actions)
+        button('Setup / help',lambda:QMessageBox.information(self,'Printer setup',printer_setup_help()),actions)
+        button('Queue status',self.show_queue_status,actions)
+        self.buttons=QDialogButtonBox(QDialogButtonBox.Ok|QDialogButtonBox.Cancel)
+        self.buttons.button(QDialogButtonBox.Ok).setText('Continue')
+        self.buttons.accepted.connect(self.accept);self.buttons.rejected.connect(self.reject);layout.addWidget(self.buttons)
+        self.refresh_printers()
         fit_window(self,480,280)
+
+    def show_queue_status(self):
+        try:message=queue_status(self.printer.currentText())
+        except ValueError as exc:message=str(exc)
+        QMessageBox.information(self,'Printer queue',message)
+
+    def refresh_printers(self):
+        previous=self.printer.currentText();self.transport=printing_backend()
+        try:
+            names=available_printers();message='Choose the installed label printer. Paper size is taken from this design; scaling is 100%.'
+        except ValueError as exc:
+            names=[];message=str(exc)
+        self.printer.clear();self.printer.addItems(names)
+        index=self.printer.findText(previous)
+        if index<0:index=next((i for i,n in enumerate(names) if 'citizen' in n.lower()),0)
+        self.printer.setCurrentIndex(index)
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(bool(names))
+        self.status.setText(message if names else message.splitlines()[0]+'\n'+printer_setup_hint())
+
 
 
 class LabelTab(QWidget):
@@ -510,26 +533,39 @@ class LabelTab(QWidget):
         if not calibration and not any(e['kind'] in ('barcode','qr') for e in document['elements']):raise ValueError('Add a barcode or QR to the label.')
         dialog=LabelPrinterDialog(self)
         if dialog.exec()!=QDialog.Accepted:return
-        printer=QPrinter(QPrinter.HighResolution);printer.setPrinterName(dialog.printer.currentText())
+        queue=dialog.printer.currentText();transport=getattr(dialog,'transport','qt')
+        if transport=='cups':check_cups_queue(queue)
+        printer=QPrinter(QPrinter.HighResolution)
+        if transport=='cups':printer.setOutputFormat(QPrinter.PdfFormat)
+        else:printer.setPrinterName(queue)
         actual_dpi=configure_label_printer(printer,document,dpi)
         validate_design(document,metadata,actual_dpi,offsets)
-        summary=(f"Printer: {printer.printerName()}\nPaper: {document['width']:g} × {document['height']:g} mm at {actual_dpi} DPI\n"
+        summary=(f"Printer: {queue}\nPaper: {document['width']:g} × {document['height']:g} mm at {actual_dpi} DPI\n"
             f"Labels: {quantity}\nItem: {metadata.get('name','Calibration')}\nPrice per piece: Rs. {metadata.get('rate','0.00')}\n"
             f"Godown: {metadata.get('godown','')}\nStock increase: {quantity if add_stock else 0} pieces\n"
             f"Stock cost per piece: {'Unknown' if cost is None else f'Rs. {cost:.2f}'}\nOffsets: {offsets[0]:g}, {offsets[1]:g} mm")
         if not self.confirm_twice(summary):return
         self.db.get_label_templates()  # logout may have occurred during a modal prompt
+        def send_output():
+            if transport!='cups':
+                print_labels(printer,document,metadata,quantity,offsets)
+                return 'Submitted through the native printer driver.'
+            with tempfile.TemporaryDirectory(prefix='cloth-labels-') as folder:
+                path=Path(folder)/'labels.pdf';printer.setOutputFileName(str(path))
+                print_labels(printer,document,metadata,quantity,offsets)
+                job=submit_pdf(path,queue,document['width'],document['height'],actual_dpi,title='Cloth Shop Labels')
+            return 'CUPS job '+job
         if calibration:
-            print_labels(printer,document,metadata,1,offsets)
-            QMessageBox.information(self,'Calibration submitted','Measure the square: it must be 20 × 20 mm. Correct driver paper size/scaling before printing stock labels. No stock changed.');return
+            acknowledgement=send_output()
+            QMessageBox.information(self,'Calibration submitted',acknowledgement+'\nMeasure the square: it must be 20 × 20 mm. Correct driver paper size/scaling before printing stock labels. No stock changed.');return
         if reprint_batch:
-            batch_id=self.db.prepare_label_reprint(reprint_batch['id'],uuid.uuid4().hex,quantity,printer.printerName())
+            batch_id=self.db.prepare_label_reprint(reprint_batch['id'],uuid.uuid4().hex,quantity,queue)
         else:
-            batch_id=self.db.prepare_label_batch(uuid.uuid4().hex,iid,new_item,location,quantity,add_stock,cost,document,metadata,printer.printerName(),actual_dpi,offsets)
+            batch_id=self.db.prepare_label_batch(uuid.uuid4().hex,iid,new_item,location,quantity,add_stock,cost,document,metadata,queue,actual_dpi,offsets)
         self.db.claim_label_batch(batch_id)
         try:
-            print_labels(printer,document,metadata,quantity,offsets)
-            self.db.settle_label_batch(batch_id,True,'Submitted to printer; physical output must be checked at printer.')
+            acknowledgement=send_output()
+            self.db.settle_label_batch(batch_id,True,acknowledgement+'; physical output must be checked at printer.')
         except Exception as exc:
             self.db.mark_label_uncertain(batch_id,str(exc))
             self.refresh_history()
@@ -541,7 +577,7 @@ class LabelTab(QWidget):
             self.new_code='CS-'+uuid.uuid4().hex[:10].upper();self.code.setText(self.new_code)
         self.stock_mode.setCurrentIndex(0)
         if self.on_changed:self.on_changed()
-        QMessageBox.information(self,'Labels submitted',f'Batch L-{batch_id}: {quantity} labels sent. Stock added: {quantity if add_stock else 0}. Check physical output. Reprint through History if needed; it will not add stock again.')
+        QMessageBox.information(self,'Labels submitted',f'{acknowledgement}\nBatch L-{batch_id}: {quantity} labels sent. Stock added: {quantity if add_stock else 0}. Check physical output. Reprint through History if needed; it will not add stock again.')
 
     def history_batch(self):
         row=self.history.currentRow()

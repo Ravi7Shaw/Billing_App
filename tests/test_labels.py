@@ -323,7 +323,7 @@ class LabelTests(unittest.TestCase):
     def test_no_printer_state_and_changed_catalog_are_rejected(self):
         from label_tab import LabelPrinterDialog
         from PySide6.QtWidgets import QDialogButtonBox
-        with patch('label_tab.QPrinterInfo.availablePrinterNames',return_value=[]):dialog=LabelPrinterDialog(None)
+        with patch('label_tab.available_printers',return_value=[]):dialog=LabelPrinterDialog(None)
         self.addCleanup(dialog.close)
         self.assertFalse(dialog.findChild(QDialogButtonBox).button(QDialogButtonBox.Ok).isEnabled())
         row=self.db.get_item_by_id(self.item)

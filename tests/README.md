@@ -186,3 +186,16 @@ printer, printing the calibration square and measuring paper output. Verify that
 cancelling either confirmation adds no stock and that reprinting a submitted
 batch adds no stock. Stop/cancel the OS print queue before reconciling a partial
 or interrupted job; automated tests never send paper jobs to a real printer.
+
+
+## Linux CUPS and Windows printing transport
+
+`test_printing.py` checks Linux queue discovery without Qt enumeration, exact
+custom media/no-scaling/copies, paused or rejecting queues, timeout/ambiguous
+submission without automatic retries, CUPS job IDs in label history, PDF label
+page counts, stock on successful versus failed submission, A4 receipt rendering,
+refreshable printer dialogs and Windows native selection without CUPS commands.
+It uses mocked command responses and temporary synthetic PDFs/databases, sending
+no real printer jobs. PDF inspection requires `tests/requirements-labels.txt`.
+Run it for both app copies using `BILLING_APP_DIR` as described above. Physical
+printing and native Windows executable verification remain device/OS checks.
