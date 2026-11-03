@@ -1,5 +1,6 @@
 """Real transactions: purchasing, valuation, accounts, permissions and migrations."""
 import os
+from datetime import date
 from pathlib import Path
 import sqlite3
 import sys
@@ -188,7 +189,8 @@ class CommerceBoundaryTests(CommerceFixture, unittest.TestCase):
         self.assertEqual((bill['godown_id'],bill['sale_channel']),(shop,'Wholesale'))
         self.assertEqual([r['cost_cents'] for r in lines],[-10000,30000])
         self.assertEqual(self.db.stock_report(shop)[0]['quantity'],6)
-        self.assertEqual(self.report(shop)['cost_cents'],40000)
+        # Exchange settlements are dated today, so the window must include today.
+        self.assertEqual(self.db.commerce_report('2026-10-01',date.today().isoformat(),shop)['cost_cents'],40000)
 
     def test_expenses_are_allocated_to_the_selected_shop(self):
         shop=self.db.save_master('Godown','Rent shop')

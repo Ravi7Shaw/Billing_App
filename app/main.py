@@ -26,7 +26,7 @@ from window_utils import fit_window, scroll_page
 from maintenance import backup_now, UpdateDialog
 
 from database import Database
-from access import AccessSession, RoleDatabase
+from access import AccessSession, RoleDatabase, make_accountant_credential, ROLE_ADMIN, ROLE_ACCOUNTANT
 from theme import STYLESHEET
 from billing_tab import BillingTab
 from commerce_ui import PurchasesTab, ChartAccountsTab
@@ -61,7 +61,8 @@ class MainWindow(QMainWindow):
             self.setWindowIcon(QIcon(APP_ICON_PATH))
 
         self.session = AccessSession()
-        self.db = RoleDatabase(Database(), self.session)
+        self.raw_db = Database()
+        self.db = RoleDatabase(self.raw_db, self.session)
 
         central = QWidget()
         central.setObjectName("centralWidget")
@@ -78,6 +79,12 @@ class MainWindow(QMainWindow):
         access_bar.setSpacing(4)
         self.admin_button = QPushButton("Admin")
         self.admin_button.clicked.connect(self._login_admin)
+        self.accountant_button = QPushButton("Accountant")
+        self.accountant_button.setToolTip("Purchases and Chart of Accounts only")
+        self.accountant_button.clicked.connect(self._login_accountant)
+        self.accountant_password_button = QPushButton("Acct password")
+        self.accountant_password_button.setToolTip("Admin: set or change the accountant login password")
+        self.accountant_password_button.clicked.connect(self._set_accountant_password)
         self.logout_button = QPushButton("Lock")
         self.logout_button.setToolTip("Lock admin and return to employee billing")
         self.logout_button.clicked.connect(self._logout_admin)
@@ -85,7 +92,8 @@ class MainWindow(QMainWindow):
         self.backup_button.clicked.connect(lambda: backup_now(self, self.db))
         self.update_button = QPushButton("Update")
         self.update_button.clicked.connect(self._update_app)
-        for button in (self.admin_button, self.backup_button, self.update_button, self.logout_button):
+        for button in (self.admin_button, self.accountant_button, self.accountant_password_button,
+                       self.backup_button, self.update_button, self.logout_button):
             button.setProperty("compact", "true")
             access_bar.addWidget(button)
         self.tabs.setCornerWidget(controls, Qt.TopRightCorner)
@@ -116,6 +124,17 @@ class MainWindow(QMainWindow):
             widget.deleteLater()
         for name in ("inventory", "customers", "balances", "expenses", "sales", "stats", "status", "offers", "exchanges", "employees", "purchases", "accounts", "labels"):
             setattr(self, name + "_tab", None)
+        self.billing_tab = None
+        if self.session.is_accountant:
+            self.purchases_tab = PurchasesTab(self.db, on_saved=self._on_catalog_changed)
+            self.accounts_tab = ChartAccountsTab(self.db, on_changed=self._on_catalog_changed,
+                on_purchase=lambda: self.tabs.setCurrentWidget(self.purchases_tab),
+                can_edit_catalog=False)
+            self.tabs.addTab(self.purchases_tab, "Purchases")
+            self.tabs.addTab(self.accounts_tab, "Chart of Accounts")
+            self.tabs.setCurrentIndex(0)
+            self._finish_dashboard()
+            return
         self.billing_tab = BillingTab(self.db, on_bill_saved=self._on_bill_saved)
         self.tabs.addTab(self.billing_tab, "New Bill")
         if self.session.is_admin:
@@ -132,11 +151,12 @@ class MainWindow(QMainWindow):
             self.sales_tab = SalesTab(self.db, autoload=False)
             self.stats_tab = StatsTab(self.db, autoload=False)
             self.employees_tab = EmployeesTab(self.db, autoload=False)
-            self.exchanges_tab = ExchangesTab(self.db, autoload=False)
             self.offers_tab = OffersTab(self.db, on_changed=self.billing_tab._refresh_offers, autoload=False)
             self.inventory_tab = InventoryTab(
                 self.db, on_catalog_changed=self._on_catalog_changed
             )
+            self.exchanges_tab = ExchangesTab(self.db, autoload=False, open_tab=self._open_work_tab,
+                close_tab=self._close_work_tab)
             self.tabs.addTab(self.inventory_tab, "Inventory")
             self.tabs.addTab(self.customers_tab, "Customers")
             self.tabs.addTab(self.balances_tab, "Balances")
@@ -151,6 +171,9 @@ class MainWindow(QMainWindow):
             widget = self.tabs.widget(index)
             if widget not in (self.stats_tab, self.purchases_tab, self.accounts_tab, self.labels_tab):
                 scroll_page(widget)
+        self._finish_dashboard()
+
+    def _finish_dashboard(self):
         self.tabs.setCurrentIndex(0)
         self.tabs.blockSignals(False)
         self.section_picker.blockSignals(True)
@@ -159,19 +182,28 @@ class MainWindow(QMainWindow):
             self.section_picker.addItem(self.tabs.tabText(index))
         self.section_picker.setCurrentIndex(0)
         self.section_picker.blockSignals(False)
-        self.section_picker.setVisible(self.session.is_admin)
-        self.section_corner.setVisible(self.session.is_admin)
         admin = self.session.is_admin
+        accountant = self.session.is_accountant
+        self.section_picker.setVisible(admin or accountant)
+        self.section_corner.setVisible(admin or accountant)
         self.admin_button.setVisible(not admin)
-        self.logout_button.setVisible(admin)
+        self.accountant_button.setVisible(not admin and not accountant)
+        self.accountant_password_button.setVisible(admin)
+        self.logout_button.setVisible(admin or accountant)
         self.backup_button.setVisible(admin)
         self.update_button.setVisible(admin)
-        self.setWindowTitle("Cloth Shop Billing System — " + ("Admin" if admin else "Employee"))
+        if admin:
+            title = "Admin"
+        elif accountant:
+            title = "Accountant"
+        else:
+            title = "Employee"
+        self.setWindowTitle("Cloth Shop Billing System — " + title)
 
     def _login_admin(self):
         if self.session.is_admin:
             return
-        if self.billing_tab.cart:
+        if self.billing_tab and self.billing_tab.cart:
             answer = QMessageBox.question(
                 self, "Switch dashboard", "Discard this unfinished bill and switch to admin?",
                 QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
@@ -188,10 +220,74 @@ class MainWindow(QMainWindow):
             return
         self._build_dashboard()
 
+    def _login_accountant(self):
+        if self.session.is_accountant or self.session.is_admin:
+            return
+        if self.billing_tab and self.billing_tab.cart:
+            answer = QMessageBox.question(
+                self, "Switch dashboard", "Discard this unfinished bill and switch to accountant?",
+                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+            )
+            if answer != QMessageBox.Yes:
+                return
+        stored = self.raw_db.get_accountant_credential()
+        if not stored:
+            QMessageBox.information(
+                self, "Accountant login not set up",
+                "The admin has not set an accountant password yet. Log in as admin and use "
+                "'Accountant password' to create one.",
+            )
+            return
+        password, accepted = QInputDialog.getText(
+            self, "Accountant login", "Accountant password:", QLineEdit.Password,
+        )
+        if not accepted:
+            return
+        if not self.session.login_accountant(password, stored):
+            QMessageBox.warning(self, "Incorrect password", "Accountant access was not unlocked.")
+            return
+        self._build_dashboard()
+
+    def _set_accountant_password(self):
+        if not self.session.is_admin:
+            return
+        first, ok = QInputDialog.getText(
+            self, "Accountant password", "New accountant password (at least 6 characters):", QLineEdit.Password,
+        )
+        if not ok:
+            return
+        if len(first) < 6:
+            QMessageBox.warning(self, "Too short", "Use at least 6 characters.")
+            return
+        second, ok = QInputDialog.getText(
+            self, "Accountant password", "Type the new password again:", QLineEdit.Password,
+        )
+        if not ok:
+            return
+        if first != second:
+            QMessageBox.warning(self, "Passwords differ", "The two entries did not match. Nothing was changed.")
+            return
+        self.raw_db.set_accountant_credential(make_accountant_credential(first))
+        QMessageBox.information(self, "Saved", "Accountant password updated.")
+
+    def _open_work_tab(self, widget, title):
+        """Show a work-in-progress screen (such as an exchange) as its own tab."""
+        scroll_page(widget)
+        index = self.tabs.addTab(widget, title)
+        self.tabs.setCurrentIndex(index)
+        return widget
+
+    def _close_work_tab(self, widget):
+        index = self.tabs.indexOf(widget)
+        if index >= 0:
+            self.tabs.removeTab(index)
+        widget.hide()
+        widget.deleteLater()
+
     def _update_app(self):
         if not self.session.is_admin:
             return
-        if self.billing_tab.cart or (self.purchases_tab and self.purchases_tab.lines):
+        if (self.billing_tab and self.billing_tab.cart) or (self.purchases_tab and self.purchases_tab.lines):
             QMessageBox.information(self, "Finish the bill", "Complete or clear the current sale or purchase before updating.")
             return
         UpdateDialog(self.db, self).exec()
@@ -202,9 +298,15 @@ class MainWindow(QMainWindow):
         self._build_dashboard()
 
     def _on_catalog_changed(self):
-        self.billing_tab.refresh_catalog()
+        if self.billing_tab:
+            self.billing_tab.refresh_catalog()
+        # A purchase or catalog edit changes stock everywhere it is shown.
         if self.purchases_tab:
             self.purchases_tab.refresh()
+        if self.accounts_tab:
+            self.accounts_tab.refresh()
+        if self.session.is_admin and self.inventory_tab:
+            self.inventory_tab._refresh_items()
 
     def _on_bill_saved(self):
         if not self.session.is_admin:
@@ -217,6 +319,11 @@ class MainWindow(QMainWindow):
         self.section_picker.blockSignals(True)
         self.section_picker.setCurrentIndex(index)
         self.section_picker.blockSignals(False)
+        if self.session.is_accountant:
+            widget = self.tabs.widget(index)
+            if widget in (self.purchases_tab, self.accounts_tab):
+                widget.refresh()
+            return
         if not self.session.is_admin:
             return
         widget = self.tabs.widget(index)

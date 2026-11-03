@@ -33,6 +33,20 @@ def cents(value):
 
 
 class CommerceQueries:
+    def get_accountant_credential(self):
+        with self._conn() as c:
+            c.execute('CREATE TABLE IF NOT EXISTS app_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+            row = c.execute("SELECT value FROM app_settings WHERE key='accountant_credential'").fetchone()
+            return row['value'] if row else None
+
+    def set_accountant_credential(self, record):
+        if not isinstance(record, str) or not record.startswith('pbkdf2_sha256$'):
+            raise ValueError('Invalid accountant credential record.')
+        with self._conn() as c:
+            c.execute('CREATE TABLE IF NOT EXISTS app_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL)')
+            c.execute("INSERT INTO app_settings(key,value) VALUES('accountant_credential',?) "
+                      "ON CONFLICT(key) DO UPDATE SET value=excluded.value", (record,))
+
     def _ensure_commerce_schema(self):
         with self._conn() as c:
             c.executescript("""

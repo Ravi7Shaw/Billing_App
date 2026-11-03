@@ -2,6 +2,7 @@
 import hashlib
 import hmac
 import inspect
+import os
 from datetime import date
 
 from money import money, line_amount, sum_money
@@ -20,24 +21,71 @@ def verify_admin_password(password):
     return hmac.compare_digest(digest, _ADMIN_DIGEST)
 
 
+ACCOUNTANT_ITERATIONS = 200000
+
+
+def make_accountant_credential(password):
+    """Return a salted PBKDF2 record for storage in app_settings."""
+    salt = os.urandom(16).hex()
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt), ACCOUNTANT_ITERATIONS
+    ).hex()
+    return f"pbkdf2_sha256${ACCOUNTANT_ITERATIONS}${salt}${digest}"
+
+
+def verify_accountant_password(password, stored):
+    if not stored:
+        return False
+    try:
+        scheme, iterations, salt, expected = stored.split("$")
+    except ValueError:
+        return False
+    if scheme != "pbkdf2_sha256":
+        return False
+    digest = hashlib.pbkdf2_hmac(
+        "sha256", password.encode("utf-8"), bytes.fromhex(salt), int(iterations)
+    ).hex()
+    return hmac.compare_digest(digest, expected)
+
+
+ROLE_EMPLOYEE = "employee"
+ROLE_ACCOUNTANT = "accountant"
+ROLE_ADMIN = "admin"
+
+
 class AccessSession:
     def __init__(self):
-        self._admin = False
+        self._role = ROLE_EMPLOYEE
         self.receipt_ids = set()
 
     @property
+    def role(self):
+        return self._role
+
+    @property
     def is_admin(self):
-        return self._admin
+        return self._role == ROLE_ADMIN
+
+    @property
+    def is_accountant(self):
+        return self._role == ROLE_ACCOUNTANT
 
     def login(self, password):
         if not verify_admin_password(password):
             return False
-        self._admin = True
+        self._role = ROLE_ADMIN
+        self.receipt_ids.clear()
+        return True
+
+    def login_accountant(self, password, stored_credential):
+        if not verify_accountant_password(password, stored_credential):
+            return False
+        self._role = ROLE_ACCOUNTANT
         self.receipt_ids.clear()
         return True
 
     def logout(self):
-        self._admin = False
+        self._role = ROLE_EMPLOYEE
         self.receipt_ids.clear()
 
 
@@ -49,9 +97,28 @@ class RoleDatabase:
         "add_customer", "quote_offers", "get_customer_phone_suggestions",
     })
 
+    # Accounting work only: purchases, ledgers, vouchers and stock reporting.
+    # Excludes sales/billing, item creation or pricing, opening stock, expenses,
+    # customers' deletion, employees and every other admin-only operation.
+    _ACCOUNTANT_METHODS = frozenset({
+        "get_items", "get_categories", "get_godowns", "get_stock_units", "get_stock_groups",
+        "get_account_groups", "get_suppliers", "get_account_ledgers", "get_advances",
+        "get_purchase", "quote_purchase", "save_purchase", "add_purchase_payment",
+        "save_master", "save_account_ledger", "configure_stock_item", "stock_report",
+        "transfer_stock", "save_voucher", "apply_advance", "account_statement",
+        "commerce_report", "add_payment",
+    })
+
     def __init__(self, database, session):
         self._database = database
         self.session = session
+
+    def _allowed(self, name):
+        if self.session.is_admin:
+            return True
+        if self.session.is_accountant:
+            return name in self._ACCOUNTANT_METHODS
+        return name in self._EMPLOYEE_METHODS
 
     def __getattr__(self, name):
         if name.startswith("_"):
@@ -63,7 +130,7 @@ class RoleDatabase:
             return target
 
         def checked(*args, **kwargs):
-            if not self.session.is_admin and name not in self._EMPLOYEE_METHODS:
+            if not self._allowed(name):
                 raise PermissionError("Admin access is required.")
             return target(*args, **kwargs)
         return checked
@@ -101,6 +168,8 @@ class RoleDatabase:
             raise PermissionError("Only admins can change the bill date.")
 
     def save_bill(self, *args, **kwargs):
+        if self.session.is_accountant:
+            raise PermissionError("Accountant access does not include billing.")
         if not self.session.is_admin:
             bound = inspect.signature(self._database.save_bill).bind(*args, **kwargs)
             bound.apply_defaults()

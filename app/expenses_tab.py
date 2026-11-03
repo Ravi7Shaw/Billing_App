@@ -12,6 +12,7 @@ Features:
 """
 
 from PySide6.QtWidgets import (
+    QSplitter,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -29,7 +30,7 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QFormLayout,
 )
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt
 
 from widgets import rupees, make_heading, confirm_delete_password
 from period_filter import PeriodFilter
@@ -60,10 +61,28 @@ class ExpensesTab(QWidget):
             )
         )
 
+        # Entry form on top, history below in a resizable splitter. The history
+        # always gets the remaining height, so it stays visible without scrolling.
+        split = QSplitter(Qt.Vertical)
+        split.setChildrenCollapsible(False)
+        outer.addWidget(split, 1)
+        top_pane = QWidget()
+        left_col = QVBoxLayout(top_pane)
+        left_col.setContentsMargins(0, 0, 0, 0)
+        bottom_pane = QWidget()
+        right_col = QVBoxLayout(bottom_pane)
+        right_col.setContentsMargins(0, 0, 0, 0)
+        right_col.setSpacing(10)
+        split.addWidget(top_pane)
+        split.addWidget(bottom_pane)
+        split.setStretchFactor(0, 0)
+        split.setStretchFactor(1, 1)
+        split.setSizes([270, 540])
+
         # ---------------- Add expense ----------------
         add_box = QGroupBox("Add Expense")
         form = QFormLayout(add_box)
-        form.setSpacing(10)
+        form.setSpacing(6)
 
         self.date_input = QDateEdit(calendarPopup=True)
         self.date_input.setDate(QDate.currentDate())
@@ -110,7 +129,7 @@ class ExpensesTab(QWidget):
         self.description_input.setPlaceholderText(
             "Optional note, e.g. September shop rent"
         )
-        self.description_input.setMaximumHeight(70)
+        self.description_input.setMaximumHeight(48)
         form.addRow("Description:", self.description_input)
 
         add_row = QHBoxLayout()
@@ -127,12 +146,12 @@ class ExpensesTab(QWidget):
 
         form.addRow("", add_row)
 
-        outer.addWidget(add_box)
+        left_col.addWidget(add_box)
 
         # ---------------- Filters ----------------
         self.period = PeriodFilter()
         self.period.changed.connect(self.refresh)
-        outer.addWidget(self.period)
+        right_col.addWidget(self.period)
         self.date_from, self.date_to = self.period.date_from, self.period.date_to
         filter_box = QGroupBox("Expense History")
         filter_row = QHBoxLayout(filter_box)
@@ -155,14 +174,14 @@ class ExpensesTab(QWidget):
         export_btn = QPushButton("Export CSV")
         export_btn.clicked.connect(self._export_csv)
         filter_row.addWidget(export_btn)
-        outer.addWidget(filter_box)
+        right_col.addWidget(filter_box)
 
         # ---------------- Summary ----------------
         self.summary_label = QLabel("Total expenses: Rs. 0.00")
         self.summary_label.setStyleSheet(
             "font-weight: 700; color: #2f6f4f; padding: 4px;"
         )
-        outer.addWidget(self.summary_label)
+        right_col.addWidget(self.summary_label)
 
         # ---------------- Table ----------------
         self.expense_table = QTableWidget(0, 8)
@@ -190,10 +209,12 @@ class ExpensesTab(QWidget):
         header.setSectionResizeMode(7, QHeaderView.ResizeToContents)
 
         self.expense_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        outer.addWidget(self.expense_table, 1)
+        self.expense_table.setMinimumHeight(260)
+        self.expense_table.verticalHeader().setDefaultSectionSize(34)
+        right_col.addWidget(self.expense_table, 1)
         self.pager = Pager()
         self.pager.changed.connect(self.refresh)
-        outer.addWidget(self.pager)
+        right_col.addWidget(self.pager)
 
     def _add_expense(self):
         category = self.category_input.currentText().strip()

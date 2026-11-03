@@ -302,8 +302,13 @@ def ledger_dialog(parent,db,record=None):
         lambda:db.save_account_ledger(name.text(),groups.currentData(),kind.currentText(),phone.text(),gst.text(),address.text(),record['id'] if record else None))
 
 
+# Catalog-changing actions that only the admin may perform. Accountants see the
+# stock and ledger screens but never these buttons.
+ADMIN_ONLY_CATALOG_BUTTONS=('Stock categories','Add item','Opening stock / cost')
+
+
 class ChartAccountsTab(QWidget):
-    def __init__(self,db,on_changed=None,on_purchase=None):
+    def __init__(self,db,on_changed=None,on_purchase=None,can_edit_catalog=True):
         super().__init__();self.db=db;self.on_changed=on_changed;self.on_purchase=on_purchase
         layout=QVBoxLayout(self)
         nav=QHBoxLayout();layout.addLayout(nav)
@@ -316,6 +321,10 @@ class ChartAccountsTab(QWidget):
         self.section.currentIndexChanged.connect(self.pages.setCurrentIndex)
         self._accounts();self._inventory();self._godowns();self._reports()
         self.scope.currentIndexChanged.connect(lambda:self._guard(self.refresh))
+        if not can_edit_catalog:
+            for widget in self.findChildren(QPushButton):
+                if widget.text() in ADMIN_ONLY_CATALOG_BUTTONS:
+                    widget.hide()
         self.refresh()
 
     def _guard(self,action):

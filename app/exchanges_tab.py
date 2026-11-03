@@ -12,12 +12,13 @@ from theme import COLORS
 
 
 class ExchangeCart(BillingTab):
-    def __init__(self, db, source_id, selections, quote, on_saved):
+    def __init__(self, db, source_id, selections, quote, on_saved, on_cancel=None):
         self.source_id = source_id
         self.selections = dict(selections)
         self.exchange_quote = quote
         self.request_key = uuid.uuid4().hex
         self.on_exchange_saved = on_saved
+        self.on_exchange_cancel = on_cancel
         self.completed = False
         super().__init__(db)
         for field in (self.phone_input,self.customer_name_input,self.customer_address_input):
@@ -32,6 +33,19 @@ class ExchangeCart(BillingTab):
     def _build_ui(self):
         super()._build_ui()
         self.layout().insertWidget(0,make_heading('Exchange purchases','Add the replacement items and any extra purchases'))
+        cancel = QPushButton('Cancel exchange')
+        cancel.setProperty('role','secondary')
+        cancel.clicked.connect(self._cancel)
+        self.layout().insertWidget(1,cancel,0,Qt.AlignRight)
+
+    def _cancel(self):
+        if self.completed:
+            return
+        if self.cart and QMessageBox.question(self,'Cancel exchange','Discard this exchange? Nothing has been saved.',
+                QMessageBox.Yes|QMessageBox.No,QMessageBox.No)!=QMessageBox.Yes:
+            return
+        if self.on_exchange_cancel:
+            self.on_exchange_cancel()
 
     def _refresh_phone_completer(self):
         # Customer is fixed to the source bill; do not load every customer phone.
@@ -110,9 +124,12 @@ class ExchangeCart(BillingTab):
 
 
 class ExchangesTab(QWidget):
-    def __init__(self, db, autoload=True):
+    def __init__(self, db, autoload=True, open_tab=None, close_tab=None):
         super().__init__()
         self.db = db
+        # The exchange screen opens as its own main-window tab, not a pop-up.
+        self._open_tab = open_tab
+        self._close_tab = close_tab
         self.source = None
         self.quote = None
         self._bills = []
@@ -271,13 +288,17 @@ class ExchangesTab(QWidget):
         self._update_quote()
         if self.quote is None:
             return
-        dialog = QDialog(self)
-        dialog.setWindowTitle('Exchange — new purchases and difference payment')
-        dialog.setObjectName('exchangeDialog')
-        dialog.setStyleSheet(f"QDialog#exchangeDialog {{ background: {COLORS['bg']}; }}")
-        dialog.resize(1300,850)
-        layout = QVBoxLayout(dialog)
-        cart = ExchangeCart(self.db,self.source['bill']['id'],self._selections(),self.quote,dialog.accept)
-        layout.addWidget(cart)
-        dialog.exec()
-        self.refresh()
+        if self._open_tab is None:
+            raise RuntimeError('Exchanges must be opened from the main window.')
+        bill_no = self.source['bill']['bill_no']
+        holder = {}
+
+        def finish():
+            if holder.get('cart') is not None and self._close_tab:
+                self._close_tab(holder['cart'])
+            self.refresh()
+
+        cart = ExchangeCart(self.db,self.source['bill']['id'],self._selections(),self.quote,finish,
+            on_cancel=finish)
+        holder['cart'] = cart
+        self._open_tab(cart,f'Exchange {bill_no}')

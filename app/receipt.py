@@ -16,6 +16,8 @@ from window_utils import fit_window
 
 from PySide6.QtWidgets import (
     QDialog,
+    QLayout,
+    QSizePolicy,
     QVBoxLayout,
     QHBoxLayout,
     QTextEdit,
@@ -1198,9 +1200,15 @@ class ReceiptDialog(QDialog):
         self.bill_items = bill_items
 
         layout = QVBoxLayout(self)
+        # The preview may be larger than the screen. Its content must never push
+        # the dialog past the screen, so the Print / Save PDF / Close row stays
+        # visible at the bottom and the page scrolls inside the preview.
+        layout.setSizeConstraint(QLayout.SetNoConstraint)
+        self.setSizeGripEnabled(True)
 
         self.text_edit = QTextEdit()
         self.text_edit.setReadOnly(True)
+        self.text_edit.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.text_edit.setFont(QFont("Arial", 10))
 
         document = QTextDocument(self)
