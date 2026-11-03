@@ -6,6 +6,7 @@ Entry point for the Cloth Shop Billing System.
 
 import os
 import sys
+import time
 
 from PySide6.QtWidgets import (
     QApplication,
@@ -40,6 +41,7 @@ from expenses_tab import ExpensesTab
 from offers_tab import OffersTab
 from exchanges_tab import ExchangesTab
 from employees_tab import EmployeesTab
+from exchanges_tab import ExchangeCart
 
 
 def resource_path(relative_path):
@@ -82,9 +84,8 @@ class MainWindow(QMainWindow):
         self.accountant_button = QPushButton("Accountant")
         self.accountant_button.setToolTip("Purchases and Chart of Accounts only")
         self.accountant_button.clicked.connect(self._login_accountant)
-        self.accountant_password_button = QPushButton("Acct password")
-        self.accountant_password_button.setToolTip("Admin: set or change the accountant login password")
-        self.accountant_password_button.clicked.connect(self._set_accountant_password)
+        self._accountant_failures = 0
+        self._accountant_locked_until = 0.0
         self.logout_button = QPushButton("Lock")
         self.logout_button.setToolTip("Lock admin and return to employee billing")
         self.logout_button.clicked.connect(self._logout_admin)
@@ -92,7 +93,7 @@ class MainWindow(QMainWindow):
         self.backup_button.clicked.connect(lambda: backup_now(self, self.db))
         self.update_button = QPushButton("Update")
         self.update_button.clicked.connect(self._update_app)
-        for button in (self.admin_button, self.accountant_button, self.accountant_password_button,
+        for button in (self.admin_button, self.accountant_button,
                        self.backup_button, self.update_button, self.logout_button):
             button.setProperty("compact", "true")
             access_bar.addWidget(button)
@@ -140,7 +141,8 @@ class MainWindow(QMainWindow):
         if self.session.is_admin:
             self.purchases_tab = PurchasesTab(self.db, on_saved=self._on_catalog_changed)
             self.accounts_tab = ChartAccountsTab(self.db, on_changed=self._on_catalog_changed,
-                on_purchase=lambda: self.tabs.setCurrentWidget(self.purchases_tab))
+                on_purchase=lambda: self.tabs.setCurrentWidget(self.purchases_tab),
+                on_accountant_password=self._set_accountant_password)
             self.labels_tab = LabelTab(self.db, on_changed=self._on_catalog_changed)
             self.tabs.addTab(self.labels_tab, "Barcode Labels")
             self.tabs.addTab(self.purchases_tab, "Purchases")
@@ -188,7 +190,6 @@ class MainWindow(QMainWindow):
         self.section_corner.setVisible(admin or accountant)
         self.admin_button.setVisible(not admin)
         self.accountant_button.setVisible(not admin and not accountant)
-        self.accountant_password_button.setVisible(admin)
         self.logout_button.setVisible(admin or accountant)
         self.backup_button.setVisible(admin)
         self.update_button.setVisible(admin)
@@ -200,16 +201,35 @@ class MainWindow(QMainWindow):
             title = "Employee"
         self.setWindowTitle("Cloth Shop Billing System — " + title)
 
+    def _unfinished_work(self):
+        """Return a description of unsaved work that a dashboard rebuild would discard."""
+        items = []
+        if self.billing_tab and self.billing_tab.cart:
+            items.append("an unfinished bill")
+        if self.purchases_tab and self.purchases_tab.lines:
+            items.append("an unfinished purchase")
+        for index in range(self.tabs.count()):
+            widget = self.tabs.widget(index)
+            if isinstance(widget, ExchangeCart) and not widget.completed and widget.cart:
+                items.append("an unfinished exchange")
+                break
+        return items
+
+    def _confirm_discard(self, action):
+        items = self._unfinished_work()
+        if not items:
+            return True
+        answer = QMessageBox.question(
+            self, action, "This will discard " + " and ".join(items) + ". Continue?",
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
+        )
+        return answer == QMessageBox.Yes
+
     def _login_admin(self):
         if self.session.is_admin:
             return
-        if self.billing_tab and self.billing_tab.cart:
-            answer = QMessageBox.question(
-                self, "Switch dashboard", "Discard this unfinished bill and switch to admin?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
-                return
+        if not self._confirm_discard("Switch dashboard"):
+            return
         password, accepted = QInputDialog.getText(
             self, "Admin login", "Admin password:", QLineEdit.Password,
         )
@@ -223,13 +243,8 @@ class MainWindow(QMainWindow):
     def _login_accountant(self):
         if self.session.is_accountant or self.session.is_admin:
             return
-        if self.billing_tab and self.billing_tab.cart:
-            answer = QMessageBox.question(
-                self, "Switch dashboard", "Discard this unfinished bill and switch to accountant?",
-                QMessageBox.Yes | QMessageBox.No, QMessageBox.No,
-            )
-            if answer != QMessageBox.Yes:
-                return
+        if not self._confirm_discard("Switch dashboard"):
+            return
         stored = self.raw_db.get_accountant_credential()
         if not stored:
             QMessageBox.information(
@@ -238,14 +253,22 @@ class MainWindow(QMainWindow):
                 "'Accountant password' to create one.",
             )
             return
+        if time.monotonic() < self._accountant_locked_until:
+            QMessageBox.warning(self, "Try again later", "Too many wrong passwords. Wait a minute and try again.")
+            return
         password, accepted = QInputDialog.getText(
             self, "Accountant login", "Accountant password:", QLineEdit.Password,
         )
         if not accepted:
             return
         if not self.session.login_accountant(password, stored):
+            self._accountant_failures += 1
+            if self._accountant_failures >= 5:
+                self._accountant_failures = 0
+                self._accountant_locked_until = time.monotonic() + 60
             QMessageBox.warning(self, "Incorrect password", "Accountant access was not unlocked.")
             return
+        self._accountant_failures = 0
         self._build_dashboard()
 
     def _set_accountant_password(self):

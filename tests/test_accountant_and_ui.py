@@ -245,7 +245,7 @@ class AccountantDashboardTests(_Base):
         self.assertIsNone(window.billing_tab)
         self.assertTrue(window.accountant_button.isHidden())
         self.assertFalse(window.logout_button.isHidden())
-        self.assertTrue(window.accountant_password_button.isHidden())
+        self.assertNotIn('Accountant password',[b.text() for b in window.accounts_tab.findChildren(QPushButton)])
 
     def test_accountant_cannot_open_while_no_password_exists(self):
         from main import MainWindow
@@ -258,6 +258,33 @@ class AccountantDashboardTests(_Base):
         info.assert_called_once()
         prompt.assert_not_called()
         self.assertFalse(window.session.is_accountant)
+
+
+class AccountantLoginThrottleTests(_Base):
+    def test_five_wrong_passwords_pause_accountant_login(self):
+        from main import MainWindow
+        self.db.set_accountant_credential(make_accountant_credential(ACCOUNTANT_PASSWORD))
+        with patch('main.Database', return_value=self.db):
+            window = MainWindow()
+        self.addCleanup(window.close)
+        with patch('main.QInputDialog.getText', return_value=('wrong', True)) as prompt, \
+                patch('main.QMessageBox.warning') as warning:
+            for _ in range(5):
+                window._login_accountant()
+            self.assertEqual(prompt.call_count, 5)
+            window._login_accountant()
+        self.assertEqual(prompt.call_count, 5, 'the sixth attempt must not even ask for a password')
+        self.assertIn('Try again later', warning.call_args[0][1])
+        self.assertFalse(window.session.is_accountant)
+
+    def test_no_prompt_when_nothing_is_unfinished(self):
+        from main import MainWindow
+        with patch('main.Database', return_value=self.db):
+            window = MainWindow()
+        self.addCleanup(window.close)
+        with patch('main.QMessageBox.question') as question:
+            self.assertTrue(window._confirm_discard('Lock'))
+        question.assert_not_called()
 
 
 if __name__ == '__main__':

@@ -7,13 +7,14 @@ from PySide6.QtCore import QDate, Qt
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QScrollArea,
     QTabWidget, QLabel, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPushButton,
     QTableWidget, QTableWidgetItem, QHeaderView, QMessageBox, QDialog, QDialogButtonBox,
-    QDateEdit, QInputDialog, QAbstractItemView)
+    QDateEdit, QInputDialog, QAbstractItemView, QGroupBox, QGridLayout, QListWidget,
+    QSizePolicy)
 from commerce import cents
 from reporting import money_cents
 from receipt import ReceiptDialog, SHOP_NAME, SHOP_PHONE, SHOP_GSTIN, SHOP_ADDRESS
 from report_export import export_csv
 from period_filter import PeriodFilter
-from window_utils import fit_window
+from window_utils import fit_window, scroll_page
 
 
 def amount(value):
@@ -67,6 +68,15 @@ def button(text,callback,layout):
     return widget
 
 
+def tool(text,callback,layout):
+    """Compact toolbar button: sized to its label, never stretched across the row."""
+    widget=QPushButton(text)
+    widget.clicked.connect(callback)
+    widget.setSizePolicy(QSizePolicy.Maximum,QSizePolicy.Fixed)
+    layout.addWidget(widget)
+    return widget
+
+
 def note(text,layout):
     widget=QLabel(text)
     widget.setWordWrap(True)
@@ -93,6 +103,10 @@ def populate(widget,rows):
     for i,row in enumerate(rows):
         for j,value in enumerate(row):
             widget.setItem(i,j,QTableWidgetItem('' if value is None else str(value)))
+    # Fit columns to their headings and values so no header is cut off. Large
+    # reports keep their current widths to stay responsive.
+    if len(rows)<=500:
+        widget.resizeColumnsToContents()
 
 
 def scroll(content):
@@ -151,56 +165,80 @@ def show_purchase(db,pid,parent):
 
 
 class PurchasesTab(QWidget):
+    """One voucher screen: header, parties, item entry, items and payment together."""
     def __init__(self,db,on_saved=None):
         super().__init__()
-        self.db=db; self.on_saved=on_saved; self.lines=[]; self.saved_id=None
-        layout=QVBoxLayout(self)
-        self.pages=QTabWidget(); layout.addWidget(self.pages,1)
-        details=QWidget(); form=QFormLayout(details)
-        form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        self.db=db; self.on_saved=on_saved; self.lines=[]; self.saved_id=None; self.total=0
+        # The entry area scrolls on small screens; the payment and save row stays pinned.
+        root=QVBoxLayout(self); root.setSpacing(8)
+        body=QWidget(); outer=QVBoxLayout(body); outer.setSpacing(8); outer.setContentsMargins(0,0,0,0)
+        root.addWidget(scroll(body),1)
+
+        # Header: who we bought from, which invoice, when, and where it goes.
+        head=QGroupBox('Purchase voucher'); grid=QGridLayout(head)
         self.supplier=combo(); self.supplier.currentIndexChanged.connect(self._supplier_changed)
         self.invoice=QLineEdit(); self.date=date_field(); self.godown=combo()
         self.mode=combo([('Without GST',False),('With GST',True)])
         self.mode.currentIndexChanged.connect(self._mode_changed)
-        for label,field in [('Supplier ledger',self.supplier),('Supplier invoice no.',self.invoice),('Purchase date',self.date),('Receiving godown',self.godown),('GST mode',self.mode)]:
-            form.addRow(label,field)
-        add=QPushButton('Add supplier ledger');add.clicked.connect(self._new_supplier);form.addRow(add)
+        grid.addWidget(QLabel('Supplier ledger'),0,0); grid.addWidget(self.supplier,0,1,1,2)
+        add_supplier=QPushButton('+ Supplier'); add_supplier.setSizePolicy(QSizePolicy.Maximum,QSizePolicy.Fixed)
+        add_supplier.clicked.connect(self._new_supplier); grid.addWidget(add_supplier,0,3)
+        grid.addWidget(QLabel('Supplier invoice no.'),1,0); grid.addWidget(self.invoice,1,1)
+        grid.addWidget(QLabel('Purchase date'),1,2); grid.addWidget(self.date,1,3)
+        grid.addWidget(QLabel('Receiving godown'),2,0); grid.addWidget(self.godown,2,1)
+        grid.addWidget(QLabel('GST mode'),2,2); grid.addWidget(self.mode,2,3)
+        grid.setColumnStretch(1,2); grid.setColumnStretch(3,2)
+        outer.addWidget(head)
+
+        # Parties side by side. Buyer defaults to this shop; seller follows the ledger.
+        parties_row=QHBoxLayout(); outer.addLayout(parties_row)
         self.parties={}
         for title,defaults in [('Seller',{}),('Buyer',dict(name=SHOP_NAME,phone=SHOP_PHONE,gst=SHOP_GSTIN,address=SHOP_ADDRESS))]:
-            form.addRow(QLabel('<b>'+title+'</b>'))
-            fields={}
+            box=QGroupBox(title); form=QFormLayout(box); fields={}
             for key in ('name','phone','gst','address'):
-                field=QLineEdit(defaults.get(key,''));fields[key]=field
+                field=QLineEdit(defaults.get(key,'')); fields[key]=field
                 field.setPlaceholderText('Optional' if key=='address' else ('Required only with GST' if key=='gst' else 'Required'))
                 form.addRow(key.upper() if key=='gst' else key.title(),field)
             self.parties[title]=fields
-        self.pages.addTab(scroll(details),'Seller / Buyer')
-        items=QWidget(); item_layout=QVBoxLayout(items)
-        line_controls=QWidget(); line_form=QFormLayout(line_controls);line_form.setRowWrapPolicy(QFormLayout.WrapLongRows)
+            parties_row.addWidget(box,1)
+
+        # Item entry row: pick the item, then quantity, rate and tax, then Add.
+        entry=QGroupBox('Add item'); entry_grid=QGridLayout(entry)
         self.item=combo();self.unit=combo();self.qty=number(True,1000000);self.qty.setMinimum(1)
         self.rate=number();self.discount=number();self.gst=number(maximum=100)
         self.item.currentIndexChanged.connect(self._item_changed)
-        for label,field in [('Item',self.item),('Purchase unit',self.unit),('Quantity (units)',self.qty),('Price per unit, before GST',self.rate),('Line discount (Rs.)',self.discount),('GST %',self.gst)]:
-            line_form.addRow(label,field)
-        add=QPushButton('Add item');add.clicked.connect(self._add);line_form.addRow(add)
-        self.pages.addTab(scroll(line_controls),'Add items')
+        for col,(label,field) in enumerate([('Item',self.item),('Purchase unit',self.unit),('Quantity (units)',self.qty),
+                ('Price per unit (Rs.)',self.rate),('Line discount (Rs.)',self.discount),('GST %',self.gst)]):
+            entry_grid.addWidget(QLabel(label),0,col); entry_grid.addWidget(field,1,col)
+        entry_grid.setColumnStretch(0,3)
+        add=QPushButton('Add to purchase'); add.clicked.connect(self._add); add.setProperty('role','primary')
+        entry_grid.addWidget(add,1,6)
+        outer.addWidget(entry)
+
+        # Items being purchased.
         self.cart=table(['Item','Units','Pieces/unit','Price/unit','Discount','GST %','Total'])
-        item_layout.addWidget(self.cart,1)
-        controls=QHBoxLayout();item_layout.addLayout(controls)
-        button('Remove selected',self._remove,controls)
-        button('Edit selected',self._edit,controls)
-        self.total_label=note('Add items to begin.',item_layout)
-        payment=QFormLayout();item_layout.addLayout(payment)
+        self.cart.setMinimumSize(0,140)
+        outer.addWidget(self.cart,1)
+        controls=QHBoxLayout(); outer.addLayout(controls)
+        tool('Remove selected',self._remove,controls); tool('Edit selected',self._edit,controls)
+        controls.addStretch(1)
+        self.total_label=QLabel('Add items to begin.'); self.total_label.setStyleSheet('font-weight:700;')
+        controls.addWidget(self.total_label)
+
+        # Payment and save, pinned below the scrolling entry area.
+        footer=QGridLayout(); root.addLayout(footer)
         self.paid=number();self.payment_mode=combo([(s,s) for s in ('Cash','Card','UPI','Bank','Other')])
-        payment.addRow('Paid now (Rs.)',self.paid);payment.addRow('Payment method',self.payment_mode)
         self.paid.valueChanged.connect(self._balance)
-        self.balance=note('',item_layout)
-        self.pages.addTab(items,'Purchase bill')
-        footer=QHBoxLayout();layout.addLayout(footer)
-        self.save_button=button('Save purchase',self._save,footer)
-        self.receipt_button=button('Last receipt',self._receipt,footer);self.receipt_button.setEnabled(False)
-        self.clear_button=button('Clear draft',self._clear,footer)
-        self.total=0
+        footer.addWidget(QLabel('Paid now (Rs.)'),0,0); footer.addWidget(self.paid,0,1)
+        footer.addWidget(QLabel('Payment method'),0,2); footer.addWidget(self.payment_mode,0,3)
+        self.balance=QLabel(''); self.balance.setStyleSheet('font-weight:700;')
+        footer.addWidget(self.balance,1,0,1,4)
+        buttons=QHBoxLayout(); footer.addLayout(buttons,2,0,1,4)
+        self.clear_button=tool('Clear draft',self._clear,buttons)
+        buttons.addStretch(1)
+        self.receipt_button=tool('Last receipt',self._receipt,buttons); self.receipt_button.setEnabled(False)
+        self.save_button=QPushButton('Save purchase'); self.save_button.setProperty('role','primary')
+        self.save_button.clicked.connect(self._save); buttons.addWidget(self.save_button)
         self.refresh();self._mode_changed()
 
     def refresh(self):
@@ -237,7 +275,7 @@ class PurchasesTab(QWidget):
         try:self.db.quote_purchase([line],self.mode.currentData())
         except (ValueError,sqlite3.Error,PermissionError) as exc:
             QMessageBox.warning(self,'Invalid item',str(exc));return
-        self.lines.append(line);self._render();self.pages.setCurrentIndex(2)
+        self.lines.append(line);self._render();self.item.setFocus()
 
     def _remove(self):
         row=self.cart.currentRow()
@@ -249,7 +287,7 @@ class PurchasesTab(QWidget):
         line=self.lines.pop(row)
         self.item.setCurrentIndex(self.item.findData(line['item_id']));self.unit.setCurrentIndex(self.unit.findData(line['unit_id']))
         for key,field in [('quantity',self.qty),('rate',self.rate),('discount',self.discount),('gst_rate',self.gst)]:field.setValue(line[key])
-        self._render();self.pages.setCurrentIndex(1)
+        self._render();self.qty.setFocus()
 
     def _render(self):
         if not hasattr(self,'cart'):return
@@ -259,7 +297,7 @@ class PurchasesTab(QWidget):
         self.save_button.setEnabled(True)
         populate(self.cart,[(r['name'],f"{r['quantity']} {r['unit_name']}",r['unit_pieces'],amount(r['rate_cents']),amount(r['discount_cents']),r['gst_rate'],amount(r['net_cents']+r['gst_cents'])) for r in rows])
         net=sum(r['net_cents'] for r in rows);gst=sum(r['gst_cents'] for r in rows);self.total=net+gst
-        self.total_label.setText(f'Net Rs. {amount(net)}  |  GST Rs. {amount(gst)}  |  Total Rs. {amount(self.total)}')
+        self.total_label.setText(f'Net Rs. {amount(net)}   GST Rs. {amount(gst)}   Total Rs. {amount(self.total)}')
         self._balance()
 
     def _balance(self):
@@ -308,17 +346,24 @@ ADMIN_ONLY_CATALOG_BUTTONS=('Stock categories','Add item','Opening stock / cost'
 
 
 class ChartAccountsTab(QWidget):
-    def __init__(self,db,on_changed=None,on_purchase=None,can_edit_catalog=True):
+    def __init__(self,db,on_changed=None,on_purchase=None,can_edit_catalog=True,on_accountant_password=None):
         super().__init__();self.db=db;self.on_changed=on_changed;self.on_purchase=on_purchase
         layout=QVBoxLayout(self)
-        nav=QHBoxLayout();layout.addLayout(nav)
-        self.section=combo([(s,i) for i,s in enumerate(('Account master','Inventory master','Godowns','Reports'))])
-        nav.addWidget(self.section,1)
-        self.scope=combo();nav.addWidget(self.scope,1)
-        button('New purchase',lambda:on_purchase() if on_purchase else None,nav)
+        top=QHBoxLayout();layout.addLayout(top)
+        top.addWidget(QLabel('Scope:'))
+        self.scope=combo();top.addWidget(self.scope)
+        top.addStretch(1)
+        tool('New purchase',lambda:on_purchase() if on_purchase else None,top)
+        if can_edit_catalog and on_accountant_password:
+            tool('Accountant password',on_accountant_password,top)
         self.scope.setToolTip('Live existing shop data: Primary shows all godowns. Choose a shop for its own stock, ledger entries and reports.')
-        self.pages=QTabWidget();self.pages.tabBar().hide();layout.addWidget(self.pages,1)
-        self.section.currentIndexChanged.connect(self.pages.setCurrentIndex)
+        body=QHBoxLayout();layout.addLayout(body,1)
+        # Left navigation, as in Tally: pick the screen, the work area fills the rest.
+        self.section=QListWidget();self.section.setFixedWidth(170)
+        for name in ('Account master','Inventory master','Godowns','Reports'):self.section.addItem(name)
+        body.addWidget(self.section)
+        self.pages=QTabWidget();self.pages.tabBar().hide();body.addWidget(self.pages,1)
+        self.section.currentRowChanged.connect(self.pages.setCurrentIndex)
         self._accounts();self._inventory();self._godowns();self._reports()
         self.scope.currentIndexChanged.connect(lambda:self._guard(self.refresh))
         if not can_edit_catalog:
@@ -326,6 +371,8 @@ class ChartAccountsTab(QWidget):
                 if widget.text() in ADMIN_ONLY_CATALOG_BUTTONS:
                     widget.hide()
         self.refresh()
+        # Like Purchases, scroll rather than widen the whole window on small screens.
+        scroll_page(self)
 
     def _guard(self,action):
         try:return action()
@@ -335,10 +382,10 @@ class ChartAccountsTab(QWidget):
     def _accounts(self):
         page=QWidget();layout=QVBoxLayout(page)
         controls=QHBoxLayout();layout.addLayout(controls)
-        button('Groups',lambda:self._master('Account group'),controls)
-        button('Add ledger',lambda:self._ledger(),controls)
-        button('Edit ledger',lambda:self._ledger(True),controls)
-        button('Voucher',lambda:self._guard(self._voucher),controls)
+        tool('Groups',lambda:self._master('Account group'),controls)
+        tool('Add ledger',lambda:self._ledger(),controls)
+        tool('Edit ledger',lambda:self._ledger(True),controls)
+        tool('Voucher',lambda:self._guard(self._voucher),controls)
         self.ledger=combo();self.ledger.currentIndexChanged.connect(lambda:self._guard(self._statement))
         layout.addWidget(self.ledger)
         self.account_period=PeriodFilter('All time');layout.addWidget(self.account_period)
@@ -347,8 +394,8 @@ class ChartAccountsTab(QWidget):
         self.statement_table=table(['Date','Reference','Debit account','Credit account','Amount','Running balance (Dr + / Cr −)','Narration'])
         layout.addWidget(self.statement_table,1)
         actions=QHBoxLayout();layout.addLayout(actions)
-        button('Export statement',lambda:self._export(self.statement_table,'ledger'),actions)
-        button('Apply advance',lambda:self._guard(self._advance),actions)
+        tool('Export statement',lambda:self._export(self.statement_table,'ledger'),actions)
+        tool('Apply advance',lambda:self._guard(self._advance),actions)
         note('Payments and receipts allocated to an invoice update its outstanding balance. Unallocated vouchers hold advances. Journal / credit / debit notes adjust ledger balances; they do not change invoice totals.',layout)
         self.pages.addTab(page,'Accounts')
 
@@ -432,15 +479,15 @@ class ChartAccountsTab(QWidget):
     def _inventory(self):
         page=QWidget();layout=QVBoxLayout(page)
         controls=QHBoxLayout();layout.addLayout(controls)
-        button('Stock groups',lambda:self._master('Stock group'),controls)
-        button('Units',lambda:self._master('Unit'),controls)
-        button('Stock categories',self._category,controls)
-        button('Add item',self._new_item,controls)
+        tool('Stock groups',lambda:self._master('Stock group'),controls)
+        tool('Units',lambda:self._master('Unit'),controls)
+        tool('Stock categories',self._category,controls)
+        tool('Add item',self._new_item,controls)
         self.stock_table=table(['ID','Stock item','Category','Brand / style','Stock group','Specification','Unit','Pieces/unit','Total pieces','Stock cost'])
         layout.addWidget(self.stock_table,1)
         actions=QHBoxLayout();layout.addLayout(actions)
-        button('Configure selected item',self._configure_item,actions)
-        button('Export inventory',lambda:self._export(self.stock_table,'inventory'),actions)
+        tool('Configure selected item',self._configure_item,actions)
+        tool('Export inventory',lambda:self._export(self.stock_table,'inventory'),actions)
         note('Stock categories and items share the existing Inventory catalog. Rates in New Bill are per piece; purchase units convert into pieces. Changing a unit never changes posted purchases.',layout)
         self.pages.addTab(page,'Inventory')
 
@@ -479,9 +526,9 @@ class ChartAccountsTab(QWidget):
         page=QWidget();layout=QVBoxLayout(page)
         controls=QHBoxLayout();layout.addLayout(controls)
         self.stock_location=self.scope
-        button('Manage godowns',lambda:self._master('Godown'),controls)
+        tool('Manage godowns',lambda:self._master('Godown'),controls)
         actions=QHBoxLayout();layout.addLayout(actions)
-        button('Transfer stock',self._transfer,actions);button('Opening stock / cost',self._opening,actions)
+        tool('Transfer stock',self._transfer,actions);tool('Opening stock / cost',self._opening,actions)
         self.godown_table=table(['Item','Category','Pieces','Value (Rs.)'])
         layout.addWidget(self.godown_table,1)
         note('Primary totals all shops. Default shop is the location holding existing stock and employee sales. Opening costs must be entered before the first transaction for that item and shop. Unknown historical costs stay marked Unknown.',layout)
@@ -519,8 +566,8 @@ class ChartAccountsTab(QWidget):
         self.movement_table=table(['Date','Godown','Item','In (pcs)','Out (pcs)','Reference'])
         self.report_pages.addTab(self.movement_table,'Stock in / out')
         controls=QHBoxLayout();layout.addLayout(controls)
-        button('Export current report',lambda:self._export(self.report_pages.currentWidget(),'report'),controls)
-        button('Open purchase receipt',self._report_receipt,controls)
+        tool('Export current report',lambda:self._export(self.report_pages.currentWidget(),'report'),controls)
+        tool('Open purchase receipt',self._report_receipt,controls)
         note('Profit excludes GST and deducts item costs and expenses. Unknown costs are flagged. Backdated entries do not revise earlier sale costs. The channel filter applies to sales; paid and balance figures include all payments to date.',layout)
         for signal in (self.period.changed,self.channel.currentIndexChanged):signal.connect(lambda:self._guard(self._report))
         self.pages.addTab(page,'Reports')

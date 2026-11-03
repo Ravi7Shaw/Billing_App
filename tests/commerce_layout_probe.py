@@ -22,9 +22,9 @@ with tempfile.TemporaryDirectory() as d:
     for width,height in ((640,480),(800,600),(1366,768),(1920,1080)):
         for tab in (window.purchases_tab,window.accounts_tab):
             window.tabs.setCurrentWidget(tab)
-            for index in range(tab.pages.count()):
-                if hasattr(tab,'section'):tab.section.setCurrentIndex(index)
-                else:tab.pages.setCurrentIndex(index)
+            pages=[tab] if tab is window.purchases_tab else range(tab.pages.count())
+            for index in pages:
+                if tab is window.accounts_tab:tab.section.setCurrentRow(index)
                 window.resize(width,height);QTest.qWait(25)
                 assert window.width()<=width and window.height()<=height,(type(tab).__name__,index,width,height,window.size())
                 if tab is window.purchases_tab:
